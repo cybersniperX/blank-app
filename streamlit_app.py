@@ -481,28 +481,37 @@ with chart_col2:
         st.plotly_chart(fig_games, use_container_width=True)
 
 with chart_col3:
-    if not df_stock.empty:
-        fig_stock = px.bar(
-            df_stock,
-            x="Company",
-            y="Stock Price",
-            title="Current Stock Prices of Major Gaming Companies",
-            color="Company",
-            color_discrete_map={
-                "Nintendo": "#E60012",
-                "Sony (PlayStation)": "#003791",
-                "Microsoft (Xbox)": "#107C10"
-            }
+    if "release_date" in df.columns and "player_count" in df.columns:
+
+        trend_df = df.dropna(subset=["release_date", "player_count"]).copy()
+        trend_df["year"] = trend_df["release_date"].dt.year
+
+        yearly_players = trend_df.groupby("year")["player_count"].sum().reset_index()
+
+        fig_scatter = px.scatter(
+            yearly_players,
+            x="year",
+            y="player_count",
+            title="Total Mobile Gamers per Year in Million",
         )
-        fig_stock.update_layout(
+
+        
+        fig_scatter.update_traces(
+            marker=dict(
+                size=10,
+                color="#003791"  
+            )
+        )
+
+        fig_scatter.update_layout(
             plot_bgcolor="white",
             paper_bgcolor="white",
             title_x=0.5,
-            showlegend=False,
             title_xanchor="center",
             title_font_size=13
         )
-        st.plotly_chart(fig_stock, use_container_width=True)
+
+        st.plotly_chart(fig_scatter, use_container_width=True)
 
 # Game Reviews and Raw Data
 st.subheader("Game Reviews and Data Tables")
