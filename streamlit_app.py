@@ -450,6 +450,10 @@ with chart_col1:
             color="Number of Games",
             color_continuous_scale="Blues"
         )
+        fig_publishers.update_traces(
+            marker_color="#003791"
+        )
+
         fig_publishers.update_layout(
             plot_bgcolor="white",
             paper_bgcolor="white",
@@ -471,6 +475,10 @@ with chart_col2:
             color="player_count",
             color_continuous_scale="Blues"
         )
+        fig_games.update_traces(
+            marker_color="#003791"
+        )
+
         fig_games.update_layout(
             plot_bgcolor="white",
             paper_bgcolor="white",
