@@ -6,11 +6,16 @@ from urllib.parse import urlparse, parse_qs
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
 from transformers import pipeline
 from google_play_scraper import app, reviews, Sort
 
 st.set_page_config(page_title="Google Play Scraper and Analysis Dashboard", layout="wide")
 st.title("Google Play Scraper")
+
+nltk.download("vader_lexicon", quiet=True)
+sia = SentimentIntensityAnalyzer()
 
 st.markdown("""
 <style>
@@ -33,6 +38,7 @@ COUNTRY_OPTIONS = ["ph"]
 
 COUNT_PER_BATCH = 200
 SCRAPE_MAX_ROUNDS_PER_QUERY = 3000
+ROBERTA_BATCH_SIZE = 32
 
 
 @st.cache_resource
@@ -44,33 +50,50 @@ def load_model():
     )
 
 
-classifier = load_model()
-
-
 def map_label(label):
-    if label == "LABEL_0":
-        return "negative"
-    elif label == "LABEL_1":
-        return "neutral"
-    elif label == "LABEL_2":
-        return "positive"
-    return "unknown"
+    label = str(label).strip().lower()
+
+    label_map = {
+        "label_0": "negative",
+        "label_1": "neutral",
+        "label_2": "positive",
+        "negative": "negative",
+        "neutral": "neutral",
+        "positive": "positive"
+    }
+
+    return label_map.get(label, "neutral")
 
 
-def predict_sentiment_batch(texts, batch_size=32):
-    clean_texts = [str(t).strip() if pd.notna(t) else "" for t in texts]
-    clean_texts = [t if t else "no text" for t in clean_texts]
+def classify_vader(text):
+    score = sia.polarity_scores(str(text))["compound"]
 
-    results = classifier(
-        clean_texts,
-        truncation=True,
-        batch_size=batch_size
-    )
+    if score >= 0.05:
+        return "positive", score
+    elif score <= -0.05:
+        return "negative", score
+    else:
+        return "neutral", score
 
-    sentiments = [map_label(r["label"]) for r in results]
-    scores = [r["score"] for r in results]
 
-    return sentiments, scores
+def looks_tagalog_or_taglish(text):
+    text = str(text).lower().strip()
+
+    filipino_markers = [
+        "ang", "mga", "naman", "lang", "kasi", "pero", "hindi", "di", "hindi",
+        "wala", "meron", "pwede", "pede", "ayos", "maayos", "pangit", "bagal",
+        "mabagal", "bilis", "mabilis", "ganda", "maganda", "gumagana", "ayaw",
+        "sira", "nakakainis", "hirap", "madali", "sobrang", "masyado", "naka",
+        "ako", "ikaw", "siya", "kami", "kayo", "nila", "nyo", "mo", "ko", "po",
+        "opo", "salamat", "ulit", "lagi", "nga", "daw", "yata", "talaga"
+    ]
+
+    marker_hits = 0
+    for word in filipino_markers:
+        if re.search(rf"\b{re.escape(word)}\b", text):
+            marker_hits += 1
+
+    return marker_hits >= 1
 
 
 def format_time(seconds):
@@ -190,6 +213,70 @@ def add_new_reviews(batch):
     return added
 
 
+def run_hybrid_sentiment(df):
+    total_reviews = len(df)
+
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    details_text = st.empty()
+
+    english_indices = []
+    fil_taglish_indices = []
+
+    texts = df["content"].fillna("").astype(str).tolist()
+
+    for i, text in enumerate(texts):
+        if looks_tagalog_or_taglish(text):
+            fil_taglish_indices.append(i)
+        else:
+            english_indices.append(i)
+
+    sentiments = ["neutral"] * total_reviews
+    sentiment_scores = [0.0] * total_reviews
+
+    processed = 0
+
+    details_text.info(
+        f"English reviews: {len(english_indices):,} | Tagalog/Taglish reviews: {len(fil_taglish_indices):,}"
+    )
+
+    # ENGLISH USING VADER
+    for idx in english_indices:
+        sentiment, score = classify_vader(texts[idx])
+        sentiments[idx] = sentiment
+        sentiment_scores[idx] = score
+
+        processed += 1
+        progress_bar.progress(processed / total_reviews)
+        status_text.text(f"Processed {processed} / {total_reviews} reviews")
+
+    # TAGALOG / TAGLISH USING ROBERTA IN BATCHES
+    if fil_taglish_indices:
+        status_text.text(f"Loading RoBERTa for {len(fil_taglish_indices):,} Tagalog/Taglish reviews...")
+        classifier = load_model()
+
+        for start in range(0, len(fil_taglish_indices), ROBERTA_BATCH_SIZE):
+            batch_indices = fil_taglish_indices[start:start + ROBERTA_BATCH_SIZE]
+            batch_texts = [texts[i] if texts[i].strip() else "no text" for i in batch_indices]
+
+            batch_results = classifier(
+                batch_texts,
+                truncation=True,
+                batch_size=ROBERTA_BATCH_SIZE
+            )
+
+            for idx, result in zip(batch_indices, batch_results):
+                sentiments[idx] = map_label(result["label"])
+                sentiment_scores[idx] = float(result["score"])
+
+                processed += 1
+                progress_bar.progress(processed / total_reviews)
+                status_text.text(f"Processed {processed} / {total_reviews} reviews")
+
+    status_text.text(f"Processed {total_reviews} / {total_reviews} reviews")
+    return sentiments, sentiment_scores, len(english_indices), len(fil_taglish_indices)
+
+
 def run_analysis(raw_df):
     st.title("Analysis Dashboard")
 
@@ -207,10 +294,6 @@ def run_analysis(raw_df):
             st.error("The scraped data does not contain a 'content' column.")
             st.stop()
 
-        df["clean_text"] = df["content"].astype(str).str.lower()
-        df["clean_text"] = df["clean_text"].str.replace(r"http\S+", "", regex=True)
-        df["clean_text"] = df["clean_text"].str.replace(r"[^a-zA-Z\s]", "", regex=True)
-
         if "at" in df.columns:
             df.rename(columns={"at": "reviewDate"}, inplace=True)
 
@@ -226,8 +309,9 @@ def run_analysis(raw_df):
             st.error("The scraped data does not contain a 'score' column.")
             st.stop()
 
-        with st.spinner("Running sentiment analysis..."):
-            sentiments, sentiment_scores = predict_sentiment_batch(df["content"].tolist())
+        st.subheader("Sentiment Processing")
+        with st.spinner("Running hybrid sentiment analysis..."):
+            sentiments, sentiment_scores, english_count, fil_count = run_hybrid_sentiment(df)
 
         df["sentiment"] = sentiments
         df["sentiment_score"] = sentiment_scores
@@ -242,6 +326,10 @@ def run_analysis(raw_df):
 
         df["actual_label"] = df["score"].apply(actual_label)
         df["reviewWordCount"] = df["content"].astype(str).apply(lambda x: len(x.split()))
+
+        st.success("Sentiment analysis complete.")
+        st.write(f"Processed with VADER: {english_count:,}")
+        st.write(f"Processed with RoBERTa: {fil_count:,}")
 
         st.subheader("Summary")
 
@@ -477,7 +565,7 @@ def run_analysis(raw_df):
             avg_sent,
             x="month",
             y="sentiment_score",
-            title="Average Sentiment Confidence Over Time"
+            title="Average Sentiment Score Over Time"
         )
 
         col1, col2, col3 = st.columns(3)
@@ -567,7 +655,7 @@ def run_analysis(raw_df):
             rating_sentiment,
             x="score",
             y="sentiment_score",
-            title="Average Sentiment Confidence per Rating"
+            title="Average Sentiment Score per Rating"
         )
 
         col1, col2 = st.columns(2)
@@ -800,4 +888,3 @@ if st.session_state.cancel_requested:
         partial_total
     )
     st.warning(f"Scraping cancelled. Partial unique reviews extracted: {partial_total:,}")
-    
