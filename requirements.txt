@@ -9,5 +9,3 @@ google-play-scraper
 scikit-learn
 nltk
 openpyxl
-transformers
-torch

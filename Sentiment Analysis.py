@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 import plotly.express as px
 from google_play_scraper import app, reviews, Sort
-from transformers import pipeline
+
 
 model = pipeline(
     "sentiment-analysis",
