@@ -10,3 +10,5 @@ lxml
 streamlit
 pandas
 google-play-scraper
+
+scikit-learn
