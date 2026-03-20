@@ -83,6 +83,7 @@ def reset_scrape_state():
     st.session_state.scrapable_reviews = None
     st.session_state.estimated_time_low = None
     st.session_state.estimated_time_high = None
+    st.session_state.corrected_total_reviews = st.session_state.total_reviews_reported or 0
 
 
 def clear_selected_app():
@@ -92,6 +93,7 @@ def clear_selected_app():
     st.session_state.checked_app_icon = None
     st.session_state.loading_app = False
     st.session_state.total_reviews_reported = None
+    st.session_state.corrected_total_reviews = None
     st.session_state.scrapable_reviews = None
     st.session_state.estimated_time_low = None
     st.session_state.estimated_time_high = None
@@ -118,6 +120,7 @@ def load_app_details():
         st.session_state.checked_app_title = result.get("title", app_id)
         st.session_state.checked_app_icon = result.get("icon")
         st.session_state.total_reviews_reported = reported_total_reviews
+        st.session_state.corrected_total_reviews = reported_total_reviews
         st.session_state.ready_to_scrape = True
         st.session_state.loading_app = False
 
@@ -149,6 +152,7 @@ defaults = {
     "checked_app_title": None,
     "checked_app_icon": None,
     "total_reviews_reported": None,
+    "corrected_total_reviews": None,
     "scrapable_reviews": None,
     "estimated_time_low": None,
     "estimated_time_high": None,
@@ -179,19 +183,45 @@ st.subheader("Find an app")
 left, right = st.columns([1, 1])
 
 with left:
-    with st.form("app_form", clear_on_submit=False):
-        st.text_input(
-            "Google Play link or package ID",
-            key="app_input",
-            placeholder=""
-        )
-        load_clicked = st.form_submit_button(
-            "Load App",
-            disabled=st.session_state.loading_app
-        )
+    st.text_input(
+        "Google Play link or package ID",
+        key="app_input",
+        placeholder=""
+    )
 
-    if load_clicked:
-        load_app_details()
+    btn_col1, btn_col2 = st.columns(2)
+
+    with btn_col1:
+        if st.button("Load App", disabled=st.session_state.loading_app, use_container_width=True):
+            load_app_details()
+
+    with btn_col2:
+        if st.session_state.checked_app_id and not st.session_state.scraping and not st.session_state.scrape_done:
+            if st.button("Scrape", use_container_width=True):
+                reset_scrape_state()
+                st.session_state.ready_to_scrape = True
+                st.session_state.scraping = True
+                st.session_state.scrape_start = time.time()
+                st.rerun()
+
+        elif st.session_state.scraping:
+            if st.button("Cancel Scrape", use_container_width=True):
+                st.session_state.cancel_requested = True
+                st.session_state.scraping = False
+                st.rerun()
+
+        elif st.session_state.scrape_done and st.session_state.all_reviews:
+            df = pd.DataFrame(st.session_state.all_reviews)
+            csv_bytes = df.to_csv(index=False).encode("utf-8")
+            safe_name = (st.session_state.checked_app_id or "reviews").replace(".", "_")
+
+            st.download_button(
+                label="Download CSV",
+                data=csv_bytes,
+                file_name=f"{safe_name}_reviews.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
 
 with right:
     if st.session_state.loading_app:
@@ -208,43 +238,55 @@ with right:
             st.write(f"**{st.session_state.checked_app_title}**")
 
             if st.session_state.scraping:
-                total_target = st.session_state.total_reviews_reported or 0
+                reported_total = st.session_state.total_reviews_reported or 0
                 current_total = len(st.session_state.all_reviews)
+                corrected_total = max(reported_total, current_total, 1)
 
-                progress_value = min(current_total / total_target, 1.0) if total_target > 0 else 0
+                st.session_state.corrected_total_reviews = corrected_total
+
+                progress_value = min(current_total / corrected_total, 1.0)
                 st.progress(progress_value)
 
-                remaining_total = max(total_target - current_total, 0)
+                remaining_total = max(corrected_total - current_total, 0)
 
                 if st.session_state.scrape_start:
                     elapsed = time.time() - st.session_state.scrape_start
-                    if current_total > 0:
+                    if current_total > 0 and remaining_total > 0:
                         rate = elapsed / current_total
                         remaining_time = remaining_total * rate
                     else:
-                        remaining_time = None
+                        remaining_time = 0
                 else:
                     remaining_time = None
 
                 status_text = (
-                    f"Reported Reviews: {total_target:,} | "
-                    f"Scraped Reviews: {current_total:,} | "
+                    f"Estimated Total Reviews: {corrected_total:,} \n "
+                    f"Scraped Reviews: {current_total:,} \n "
                     f"Estimated time to complete: {format_time(remaining_time)}"
                 )
-                st.write(status_text)
+                st.text(status_text)
 
-                if st.button("Cancel Scraping"):
-                    st.session_state.cancel_requested = True
-                    st.session_state.scraping = False
-                    st.rerun()
+                if reported_total > 0 and current_total > reported_total:
+                    st.caption(
+                        f"Google Play reported {reported_total:,} reviews, "
+                        f"but {current_total:,} unique reviews have already been retrieved."
+                    )
 
-            elif st.session_state.ready_to_scrape:
-                if st.button("Continue Scraping"):
-                    reset_scrape_state()
-                    st.session_state.ready_to_scrape = True
-                    st.session_state.scraping = True
-                    st.session_state.scrape_start = time.time()
-                    st.rerun()
+            elif st.session_state.ready_to_scrape and not st.session_state.scrape_done:
+                reported_total = st.session_state.total_reviews_reported or 0
+                corrected_total = st.session_state.corrected_total_reviews or reported_total
+
+                if corrected_total:
+                    st.write(f"Estimated Total Reviews: {corrected_total:,}")
+
+            elif st.session_state.scrape_done:
+                final_total = len(st.session_state.all_reviews)
+                corrected_total = max(
+                    st.session_state.total_reviews_reported or 0,
+                    final_total
+                )
+                st.write(f"Estimated Total Reviews: {corrected_total:,}")
+                st.write(f"Scraped Reviews: {final_total:,}")
 
 
 if st.session_state.scraping and not st.session_state.cancel_requested:
@@ -268,6 +310,10 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
         added_count = add_new_reviews(batch)
         st.session_state.batch_index += 1
         st.session_state.current_query_rounds += 1
+
+        current_total = len(st.session_state.all_reviews)
+        reported_total = st.session_state.total_reviews_reported or 0
+        st.session_state.corrected_total_reviews = max(reported_total, current_total)
 
         empty_batch = len(batch) == 0
         same_token = new_token == st.session_state.current_token
@@ -300,20 +346,20 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
 
 
 if st.session_state.scrape_done:
-    st.success(f"Scraping complete. Total unique reviews extracted: {len(st.session_state.all_reviews):,}")
+    final_total = len(st.session_state.all_reviews)
+    st.session_state.corrected_total_reviews = max(
+        st.session_state.total_reviews_reported or 0,
+        final_total
+    )
 
-    if st.session_state.all_reviews:
-        df = pd.DataFrame(st.session_state.all_reviews)
-        csv_bytes = df.to_csv(index=False).encode("utf-8")
-        safe_name = (st.session_state.checked_app_id or "reviews").replace(".", "_")
+    st.success(f"Scraping complete. Total unique reviews extracted: {final_total:,}")
 
-        st.download_button(
-            label="Download CSV",
-            data=csv_bytes,
-            file_name=f"{safe_name}_reviews.csv",
-            mime="text/csv"
-        )
 
 
 if st.session_state.cancel_requested:
-    st.warning(f"Scraping cancelled. Partial unique reviews extracted: {len(st.session_state.all_reviews):,}")
+    partial_total = len(st.session_state.all_reviews)
+    st.session_state.corrected_total_reviews = max(
+        st.session_state.total_reviews_reported or 0,
+        partial_total
+    )
+    st.warning(f"Scraping cancelled. Partial unique reviews extracted: {partial_total:,}")
