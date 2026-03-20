@@ -6,15 +6,16 @@ from urllib.parse import urlparse, parse_qs
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-import nltk
-from nltk.sentiment import SentimentIntensityAnalyzer
 from google_play_scraper import app, reviews, Sort
+from transformers import pipeline
+
+model = pipeline(
+    "sentiment-analysis",
+    model="cardiffnlp/twitter-xlm-roberta-base-sentiment"
+)
 
 st.set_page_config(page_title="Google Play Scraper and Analysis Dashboard", layout="wide")
 st.title("Google Play Scraper")
-
-nltk.download("vader_lexicon")
-sia = SentimentIntensityAnalyzer()
 
 st.markdown("""
 <style>
@@ -38,6 +39,11 @@ COUNTRY_OPTIONS = ["ph"]
 COUNT_PER_BATCH = 200
 SCRAPE_MAX_ROUNDS_PER_QUERY = 3000
 
+def clean_text(text):
+    text = str(text).lower()
+    text = re.sub(r"http\S+", "", text)
+    text = re.sub(r"[^a-zA-Z\s]", "", text)
+    return text
 
 def format_time(seconds):
     if seconds is None:
@@ -47,7 +53,6 @@ def format_time(seconds):
         return f"{sec} second" if sec == 1 else f"{sec} seconds"
     mins = max(1, round(seconds / 60))
     return f"{mins} minute" if mins == 1 else f"{mins} minutes"
-
 
 def extract_app_id_from_input(value):
     text = (value or "").strip()
@@ -156,6 +161,30 @@ def add_new_reviews(batch):
     return added
 
 
+def get_sentiment_result(text):
+    try:
+        result = model(str(text), truncation=True)[0]
+        label_map = {
+            "LABEL_0": "negative",
+            "LABEL_1": "neutral",
+            "LABEL_2": "positive"
+        }
+
+        sentiment_label = label_map.get(result["label"], "neutral")
+
+        if sentiment_label == "positive":
+            sentiment_score = float(result["score"])
+        elif sentiment_label == "negative":
+            sentiment_score = -float(result["score"])
+        else:
+            sentiment_score = 0.0
+
+        return pd.Series([sentiment_score, sentiment_label])
+
+    except Exception:
+        return pd.Series([0.0, "neutral"])
+
+
 def run_analysis(raw_df):
     st.title("Analysis Dashboard")
 
@@ -197,21 +226,8 @@ def run_analysis(raw_df):
             st.error("The scraped data does not contain a 'score' column.")
             st.stop()
 
-        # SENTIMENT SCORE
-        df["sentiment_score"] = df["content"].astype(str).apply(
-            lambda x: sia.polarity_scores(x)["compound"]
-        )
-
-        # SENTIMENT LABEL
-        def classify_sentiment(score):
-            if score >= 0.05:
-                return "positive"
-            elif score <= -0.05:
-                return "negative"
-            else:
-                return "neutral"
-
-        df["sentiment"] = df["sentiment_score"].apply(classify_sentiment)
+        # SENTIMENT SCORE AND LABEL
+        df[["sentiment_score", "sentiment"]] = df["content"].astype(str).apply(get_sentiment_result)
 
         # ACTUAL LABEL FROM RATING
         def actual_label(score):
