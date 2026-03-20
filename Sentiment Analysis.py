@@ -2,7 +2,7 @@ import time
 import re
 from collections import Counter
 from urllib.parse import urlparse, parse_qs
-from deep_translator import GoogleTranslator
+
 
 import pandas as pd
 import streamlit as st
@@ -38,13 +38,6 @@ COUNTRY_OPTIONS = ["ph"]
 
 COUNT_PER_BATCH = 200
 SCRAPE_MAX_ROUNDS_PER_QUERY = 3000
-
-def translate_text(text):
-    try:
-        return GoogleTranslator(source='auto', target='en').translate(text)
-    except:
-        return text
-
 
 
 def format_time(seconds):
@@ -204,12 +197,9 @@ def run_analysis(raw_df):
         else:
             st.error("The scraped data does not contain a 'score' column.")
             st.stop()
-       
-        df["translated_text"] = df["content"].astype(str).apply(translate_text)
-        
-        # SENTIMENT SCORE
 
-        df["sentiment_score"] = df["translated_text"].apply(
+        # SENTIMENT SCORE
+        df["sentiment_score"] = df["content"].astype(str).apply(
             lambda x: sia.polarity_scores(x)["compound"]
         )
 
