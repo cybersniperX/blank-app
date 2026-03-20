@@ -307,8 +307,9 @@ def run_analysis(raw_df):
                     top_10_lowest[["month", "avg_rating", "review_count"]],
                     use_container_width=True
                 )
+        st.subheader("Top 30 Words by Sentiment")
 
-        st.subheader("Top 30 Most Frequent Words")
+        col1, col2 = st.columns(2)
 
         default_stopwords = [
             "the", "and", "is", "to", "of", "in", "for", "on", "with", "this",
@@ -319,30 +320,51 @@ def run_analysis(raw_df):
 
         stopwords = set(default_stopwords)
 
-        text = " ".join(df["content"].dropna().astype(str))
-        words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
-        filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
-        word_counts = Counter(filtered_words)
-        top_words = word_counts.most_common(30)
-        top_words_df = pd.DataFrame(top_words, columns=["word", "count"])
+        def get_top_words(dataframe):
+            text = " ".join(dataframe["content"].dropna().astype(str))
+            words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
+            filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
+            word_counts = Counter(filtered_words)
+            top_words = word_counts.most_common(30)
+            return pd.DataFrame(top_words, columns=["word", "count"])
 
-        fig_words = px.bar(
-            top_words_df,
-            x="word",
-            y="count",
-            title="Top 30 Words in Reviews"
-        )
 
-        st.plotly_chart(fig_words, use_container_width=True)
+        # LEFT: POSITIVE
+        with col1:
+            st.subheader("Positive Reviews")
 
-        excluded_words = [
-            "the", "and", "is", "to", "of", "in", "for", "on", "with", "this",
-            "that", "it", "my", "app", "very", "so", "but", "are", "was", "be",
-            "have", "has", "had", "not", "at", "you", "we", "they", "i",
-            "ang", "nag", "your", "nyo"
-        ]
+            pos_df = df[df["sentiment"] == "positive"]
+            pos_words_df = get_top_words(pos_df)
 
-        st.write("Excluded words:", ", ".join(excluded_words))
+            fig_pos = px.bar(
+                pos_words_df,
+                x="word",
+                y="count",
+                title="Top 30 Positive Words"
+            )
+
+            st.plotly_chart(fig_pos, use_container_width=True)
+
+
+        # RIGHT: NEGATIVE
+        with col2:
+            st.subheader("Negative Reviews")
+
+            neg_df = df[df["sentiment"] == "negative"]
+            neg_words_df = get_top_words(neg_df)
+
+            fig_neg = px.bar(
+                neg_words_df,
+                x="word",
+                y="count",
+                title="Top 30 Negative Words"
+            )
+
+            st.plotly_chart(fig_neg, use_container_width=True)
+
+
+        # EXCLUDED WORDS (optional, keep at bottom)
+        st.write("Excluded words:", ", ".join(default_stopwords))
 
         # DISTRIBUTION
         st.subheader("Sentiment")
