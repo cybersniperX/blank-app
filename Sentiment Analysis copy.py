@@ -11,6 +11,7 @@ import nltk
 from nltk.sentiment import SentimentIntensityAnalyzer
 from google_play_scraper import app, reviews, Sort
 
+
 st.set_page_config(page_title="Google Play Scraper and Analysis Dashboard", layout="wide")
 st.title("Google Play Scraper")
 

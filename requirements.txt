@@ -10,3 +10,11 @@ scikit-learn
 nltk
 openpyxl
 deep_translator
+
+streamlit
+pandas
+plotly
+google-play-scraper
+transformers
+torch
+sentencepiece
