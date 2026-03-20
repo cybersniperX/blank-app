@@ -2,6 +2,7 @@ import time
 import re
 from collections import Counter
 from urllib.parse import urlparse, parse_qs
+from deep_translator import GoogleTranslator
 
 import pandas as pd
 import streamlit as st
@@ -37,6 +38,13 @@ COUNTRY_OPTIONS = ["ph"]
 
 COUNT_PER_BATCH = 200
 SCRAPE_MAX_ROUNDS_PER_QUERY = 3000
+
+def translate_text(text):
+    try:
+        return GoogleTranslator(source='auto', target='en').translate(text)
+    except:
+        return text
+
 
 
 def format_time(seconds):
@@ -196,9 +204,12 @@ def run_analysis(raw_df):
         else:
             st.error("The scraped data does not contain a 'score' column.")
             st.stop()
-
+       
+        df["translated_text"] = df["content"].astype(str).apply(translate_text)
+        
         # SENTIMENT SCORE
-        df["sentiment_score"] = df["content"].astype(str).apply(
+
+        df["sentiment_score"] = df["translated_text"].apply(
             lambda x: sia.polarity_scores(x)["compound"]
         )
 
@@ -233,11 +244,15 @@ def run_analysis(raw_df):
         col1, col2 = st.columns(2)
 
         sent_summary = df.groupby("sentiment").agg(
-            total_count=("sentiment", "count"),
-            weighted=("score", "mean")
+            total_count=("sentiment", "count")
         ).reset_index()
 
-        sent_summary["weighted"] = sent_summary["weighted"].round(2)
+        total = sent_summary["total_count"].sum()
+
+        sent_summary["weighted"] = (
+            sent_summary["total_count"] / total * 100
+        ).round(2)
+
         sent_summary = sent_summary.sort_values(by="weighted", ascending=False)
 
         with col1:
@@ -245,11 +260,15 @@ def run_analysis(raw_df):
             st.dataframe(sent_summary, use_container_width=True)
 
         class_summary = df.groupby("actual_label").agg(
-            total_count=("actual_label", "count"),
-            weighted=("score", "mean")
+            total_count=("actual_label", "count")
         ).reset_index()
 
-        class_summary["weighted"] = class_summary["weighted"].round(2)
+        total = class_summary["total_count"].sum()
+
+        class_summary["weighted"] = (
+            class_summary["total_count"] / total * 100
+        ).round(2)
+
         class_summary = class_summary.sort_values(by="weighted", ascending=False)
 
         with col2:
@@ -308,12 +327,7 @@ def run_analysis(raw_df):
             "nag", "your", "nyo"
         ]
 
-        custom_stopwords = st.text_area(
-            "Edit excluded words (comma-separated)",
-            value=",".join(default_stopwords)
-        )
-
-        stopwords = set(word.strip().lower() for word in custom_stopwords.split(","))
+        stopwords = set(default_stopwords)
 
         text = " ".join(df["content"].dropna().astype(str))
         words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
@@ -678,39 +692,8 @@ with right:
             st.write(f"**{st.session_state.checked_app_title}**")
 
             if st.session_state.scraping:
-                reported_total = st.session_state.total_reviews_reported or 0
                 current_total = len(st.session_state.all_reviews)
-                corrected_total = max(reported_total, current_total, 1)
-
-                st.session_state.corrected_total_reviews = corrected_total
-
-                progress_value = min(current_total / corrected_total, 1.0)
-                st.progress(progress_value)
-
-                remaining_total = max(corrected_total - current_total, 0)
-
-                if st.session_state.scrape_start:
-                    elapsed = time.time() - st.session_state.scrape_start
-                    if current_total > 0 and remaining_total > 0:
-                        rate = elapsed / current_total
-                        remaining_time = remaining_total * rate
-                    else:
-                        remaining_time = 0
-                else:
-                    remaining_time = None
-
-                status_text = (
-                    f"Estimated Total Reviews: {corrected_total:,} \n "
-                    f"Scraped Reviews: {current_total:,} \n "
-                    f"Estimated time to complete: {format_time(remaining_time)}"
-                )
-                st.text(status_text)
-
-                if reported_total > 0 and current_total > reported_total:
-                    st.caption(
-                        f"Google Play reported {reported_total:,} reviews, "
-                        f"but {current_total:,} unique reviews have already been retrieved."
-                    )
+                st.write(f"Scraped Reviews: {current_total:,}")
 
             elif st.session_state.ready_to_scrape and not st.session_state.scrape_done:
                 reported_total = st.session_state.total_reviews_reported or 0

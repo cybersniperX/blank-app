@@ -9,3 +9,4 @@ google-play-scraper
 scikit-learn
 nltk
 openpyxl
+deep_translator
