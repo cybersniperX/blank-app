@@ -12,3 +12,4 @@ pandas
 google-play-scraper
 
 scikit-learn
+sklearn
