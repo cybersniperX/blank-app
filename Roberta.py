@@ -51,11 +51,24 @@ ROBERTA_MAX_LENGTH = 128
 CHECKPOINT_INTERVAL = 50000
 CHECKPOINT_DIR = "checkpoints"
 
+
+def safe_name(text):
+    return re.sub(r"[^A-Za-z0-9._-]", "_", str(text or "default"))
+
+
+def get_analysis_source_id(app_id=None, raw_filename=None):
+    if app_id:
+        return f"app_{safe_name(app_id)}"
+    if raw_filename:
+        return f"file_{safe_name(raw_filename)}"
+    return "default"
+
+
 def clear_saved_checkpoints():
     checkpoint_patterns = [
         "latest_checkpoint.csv",
         "checkpoint_*.csv",
-        "*checkpoint*.csv"
+        "*checkpoint*.csv",
     ]
 
     for pattern in checkpoint_patterns:
@@ -64,6 +77,14 @@ def clear_saved_checkpoints():
                 os.remove(file_path)
             except Exception:
                 pass
+
+    if os.path.exists(CHECKPOINT_DIR):
+        for file_path in glob.glob(os.path.join(CHECKPOINT_DIR, "*.csv")):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+
 
 def reset_analysis_state():
     st.session_state.analysis_running = False
@@ -77,6 +98,7 @@ def reset_analysis_state():
     st.session_state.analysis_processed_count = 0
     st.session_state.analysis_skipped_count = 0
     st.session_state.analysis_app_id = None
+    st.session_state.analysis_source_id = None
     st.session_state.download_checkpoint_ready = False
     st.session_state.analysis_pause_requested = False
 
@@ -178,7 +200,6 @@ def restart_app_state():
         "current_stagnant_rounds",
         "seen_review_ids",
         "uploaded_raw_file",
-        "uploaded_checkpoint_file",
         "run_analysis_from_scrape",
         "analysis_running",
         "analysis_paused",
@@ -191,7 +212,9 @@ def restart_app_state():
         "analysis_processed_count",
         "analysis_skipped_count",
         "analysis_app_id",
+        "analysis_source_id",
         "download_checkpoint_ready",
+        "analysis_pause_requested",
     ]
 
     for key in keys_to_clear:
@@ -341,20 +364,20 @@ def prepare_checkpoint_df(checkpoint_df):
     return df
 
 
-def get_checkpoint_path(app_id):
-    safe_app_id = re.sub(r"[^a-zA-Z0-9._-]", "_", str(app_id or "default"))
+def get_checkpoint_path(source_id):
+    safe_source_id = safe_name(source_id)
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
-    return os.path.join(CHECKPOINT_DIR, f"{safe_app_id}_latest_checkpoint.csv")
+    return os.path.join(CHECKPOINT_DIR, f"{safe_source_id}_latest_checkpoint.csv")
 
 
-def save_latest_checkpoint(df, app_id):
-    checkpoint_path = get_checkpoint_path(app_id)
+def save_latest_checkpoint(df, source_id):
+    checkpoint_path = get_checkpoint_path(source_id)
     df.to_csv(checkpoint_path, index=False)
     return checkpoint_path
 
 
-def load_latest_checkpoint(app_id):
-    checkpoint_path = get_checkpoint_path(app_id)
+def load_latest_checkpoint(source_id):
+    checkpoint_path = get_checkpoint_path(source_id)
     if os.path.exists(checkpoint_path):
         try:
             return pd.read_csv(checkpoint_path)
@@ -363,19 +386,23 @@ def load_latest_checkpoint(app_id):
     return None
 
 
-def delete_latest_checkpoint(app_id):
-    checkpoint_path = get_checkpoint_path(app_id)
+def delete_latest_checkpoint(source_id):
+    checkpoint_path = get_checkpoint_path(source_id)
     if os.path.exists(checkpoint_path):
         os.remove(checkpoint_path)
 
 
-def start_analysis(raw_df, checkpoint_df=None):
+def start_analysis(raw_df, checkpoint_df=None, source_id=None):
     df = prepare_analysis_df(raw_df)
 
-    app_id_for_checkpoint = st.session_state.get("checked_app_id") or "uploaded_file"
+    if source_id is None:
+        source_id = get_analysis_source_id(
+            app_id=st.session_state.get("checked_app_id"),
+            raw_filename=None
+        )
 
     if checkpoint_df is None:
-        checkpoint_df = load_latest_checkpoint(app_id_for_checkpoint)
+        checkpoint_df = load_latest_checkpoint(source_id)
 
     checkpoint_df = prepare_checkpoint_df(checkpoint_df)
 
@@ -400,8 +427,10 @@ def start_analysis(raw_df, checkpoint_df=None):
     st.session_state.analysis_existing_processed = existing_processed
     st.session_state.analysis_processed_count = 0
     st.session_state.analysis_skipped_count = 0
-    st.session_state.analysis_app_id = app_id_for_checkpoint
+    st.session_state.analysis_app_id = st.session_state.get("checked_app_id")
+    st.session_state.analysis_source_id = source_id
     st.session_state.download_checkpoint_ready = False
+    st.session_state.analysis_pause_requested = False
 
 
 def process_analysis_batch():
@@ -486,14 +515,14 @@ def process_analysis_batch():
             st.session_state.analysis_processed_parts,
             ignore_index=True
         )
-        save_latest_checkpoint(current_checkpoint_df, st.session_state.analysis_app_id)
+        save_latest_checkpoint(current_checkpoint_df, st.session_state.analysis_source_id)
 
     if st.session_state.analysis_pause_requested:
         current_checkpoint_df = pd.concat(
             st.session_state.analysis_processed_parts,
             ignore_index=True
         )
-        save_latest_checkpoint(current_checkpoint_df, st.session_state.analysis_app_id)
+        save_latest_checkpoint(current_checkpoint_df, st.session_state.analysis_source_id)
         st.session_state.analysis_running = False
         st.session_state.analysis_paused = True
         st.session_state.analysis_pause_requested = False
@@ -503,10 +532,6 @@ def process_analysis_batch():
     if st.session_state.analysis_remaining_df.empty:
         st.session_state.analysis_running = False
         st.session_state.analysis_done = True
-
-
-def show_checkpoint_download():
-    pass
 
 
 def show_analysis_results(df_valid, checkpoint_df=None):
@@ -882,8 +907,8 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             mime="text/csv"
         )
 
-        app_id_for_checkpoint = st.session_state.get("checked_app_id") or "uploaded_file"
-        delete_latest_checkpoint(app_id_for_checkpoint)
+        if st.session_state.get("analysis_source_id"):
+            delete_latest_checkpoint(st.session_state.analysis_source_id)
 
     except Exception as e:
         st.error(f"Error reading file: {e}")
@@ -929,6 +954,7 @@ defaults = {
     "analysis_processed_count": 0,
     "analysis_skipped_count": 0,
     "analysis_app_id": None,
+    "analysis_source_id": None,
     "download_checkpoint_ready": False,
     "analysis_pause_requested": False,
 }
@@ -997,13 +1023,17 @@ with tab_find_app:
                         st.session_state.analysis_paused = False
                         st.session_state.analysis_pause_requested = False
                         st.session_state.download_checkpoint_ready = False
-                        st.rerun()  
+                        st.rerun()
 
                 else:
                     if st.button("Analyze", use_container_width=True):
                         raw_df = pd.DataFrame(st.session_state.all_reviews)
+                        source_id = get_analysis_source_id(
+                            app_id=st.session_state.get("checked_app_id"),
+                            raw_filename=None
+                        )
                         reset_analysis_state()
-                        start_analysis(raw_df)
+                        start_analysis(raw_df, source_id=source_id)
                         st.rerun()
             else:
                 st.button("Analyze", disabled=True, use_container_width=True)
@@ -1012,12 +1042,12 @@ with tab_find_app:
             if st.session_state.scrape_done and st.session_state.all_reviews:
                 df_download = pd.DataFrame(st.session_state.all_reviews)
                 csv_bytes = df_download.to_csv(index=False).encode("utf-8")
-                safe_name = (st.session_state.checked_app_id or "reviews").replace(".", "_")
+                download_name = safe_name(st.session_state.checked_app_id or "reviews")
 
                 st.download_button(
                     label="Save Raw Data",
                     data=csv_bytes,
-                    file_name=f"{safe_name}_reviews.csv",
+                    file_name=f"{download_name}_reviews.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
@@ -1047,11 +1077,23 @@ with tab_find_app:
 
                 elif st.session_state.scrape_done:
                     final_total = len(st.session_state.all_reviews)
-                    corrected_total = max(
-                        st.session_state.total_reviews_reported or 0,
-                        final_total
-                    )
                     st.caption(f"Scraped Reviews: {final_total:,}")
+                    st.markdown(
+                        """
+                        <div style="
+                            display: inline-block;
+                            padding: 4px 8px;
+                            background-color: #e8f5e9;
+                            color: #2e7d32;
+                            border-radius: 6px;
+                            font-size: 12px;
+                            margin-top: 4px;
+                        ">
+                            Scraping complete
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
 
             if st.session_state.loading_app:
                 st.caption("Loading app details...")
@@ -1082,8 +1124,12 @@ with tab_load_files:
                     st.error("Please upload a raw data file first.")
                 else:
                     raw_df = pd.read_csv(uploaded_raw_file)
+                    source_id = get_analysis_source_id(
+                        app_id=None,
+                        raw_filename=uploaded_raw_file.name
+                    )
                     reset_analysis_state()
-                    start_analysis(raw_df, None)
+                    start_analysis(raw_df, source_id=source_id)
                     st.rerun()
 
             elif button_label == "Pause":
@@ -1176,19 +1222,16 @@ if st.session_state.analysis_running or st.session_state.download_checkpoint_rea
     if st.session_state.download_checkpoint_ready:
         st.info("Processing paused. Click Resume to continue.")
 
-
 if st.session_state.analysis_running and not st.session_state.analysis_paused:
     process_analysis_batch()
     time.sleep(0.05)
     st.rerun()
-
 
 if st.session_state.analysis_done:
     df_valid = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True)
     st.session_state.analysis_done = False
     st.session_state.download_checkpoint_ready = False
     show_analysis_results(df_valid)
-
 
 if st.session_state.cancel_requested:
     partial_total = len(st.session_state.all_reviews)
