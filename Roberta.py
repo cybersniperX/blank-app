@@ -874,6 +874,192 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         accuracy = df_valid["match"].mean()
 
         st.write(f"Model Accuracy: {accuracy:.2%}")
+
+        # =========================
+        # INFERENTIAL STATISTICS
+        # =========================
+        from scipy.stats import spearmanr, chi2_contingency, kruskal, linregress
+
+        st.subheader("Inferential Statistical Analysis")
+
+        stats_df = df_valid.copy()
+
+        required_cols = ["score", "sentiment", "sentiment_score", "reviewDate"]
+        missing_cols = [col for col in required_cols if col not in stats_df.columns]
+
+        if missing_cols:
+            st.error(f"Missing required columns: {missing_cols}")
+        else:
+            stats_df["score"] = pd.to_numeric(stats_df["score"], errors="coerce")
+            stats_df["sentiment_score"] = pd.to_numeric(stats_df["sentiment_score"], errors="coerce")
+            stats_df["reviewDate"] = pd.to_datetime(stats_df["reviewDate"], errors="coerce")
+
+            stats_df = stats_df.dropna(
+                subset=["score", "sentiment", "sentiment_score", "reviewDate"]
+            ).copy()
+
+            stats_df["month"] = stats_df["reviewDate"].dt.to_period("M").astype(str)
+
+            def classify_rating(score):
+                if score in [4, 5]:
+                    return "positive"
+                elif score == 3:
+                    return "neutral"
+                else:
+                    return "negative"
+
+            stats_df["rating_class"] = stats_df["score"].apply(classify_rating)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("### 1. Correlation Analysis")
+
+                corr_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
+
+                if len(corr_df) >= 2:
+                    corr_value, corr_p = spearmanr(corr_df["sentiment_score"], corr_df["score"])
+
+                    corr_result = pd.DataFrame({
+                        "Metric": ["Spearman Correlation", "p-value", "Interpretation"],
+                        "Value": [
+                            round(corr_value, 4),
+                            round(corr_p, 6),
+                            "Significant" if corr_p < 0.05 else "Not Significant"
+                        ]
+                    })
+
+                    st.dataframe(corr_result, use_container_width=True)
+
+                    fig_corr = px.scatter(
+                        corr_df,
+                        x="sentiment_score",
+                        y="score",
+                        title="Sentiment Score vs Star Rating",
+                        trendline="ols"
+                    )
+                    st.plotly_chart(fig_corr, use_container_width=True)
+                else:
+                    st.warning("Not enough data for correlation analysis.")
+
+            with col2:
+                st.markdown("### 2. Chi-square Test")
+
+                chi_table = pd.crosstab(stats_df["sentiment"], stats_df["rating_class"])
+
+                if chi_table.shape[0] >= 2 and chi_table.shape[1] >= 2:
+                    chi2, p, dof, expected = chi2_contingency(chi_table)
+
+                    chi_result = pd.DataFrame({
+                        "Metric": ["Chi-square", "p-value", "Degrees of Freedom", "Interpretation"],
+                        "Value": [
+                            round(chi2, 4),
+                            round(p, 6),
+                            dof,
+                            "Significant Association" if p < 0.05 else "No Significant Association"
+                        ]
+                    })
+
+                    st.dataframe(chi_result, use_container_width=True)
+                    st.dataframe(chi_table, use_container_width=True)
+
+                    fig_chi = px.imshow(
+                        chi_table,
+                        text_auto=True,
+                        aspect="auto",
+                        title="Sentiment Class vs Rating Class"
+                    )
+                    st.plotly_chart(fig_chi, use_container_width=True)
+                else:
+                    st.warning("Not enough category variation for chi-square test.")
+
+            col3, col4 = st.columns(2)
+
+            with col3:
+                st.markdown("### 3. Kruskal-Wallis Test by Month")
+
+                month_groups = []
+                monthly_grouped = stats_df.groupby("month")["sentiment_score"]
+
+                for month_name, values in monthly_grouped:
+                    clean_vals = values.dropna().tolist()
+                    if len(clean_vals) > 0:
+                        month_groups.append(clean_vals)
+
+                if len(month_groups) >= 2:
+                    kw_stat, kw_p = kruskal(*month_groups)
+
+                    kw_result = pd.DataFrame({
+                        "Metric": ["Kruskal-Wallis Statistic", "p-value", "Interpretation"],
+                        "Value": [
+                            round(kw_stat, 4),
+                            round(kw_p, 6),
+                            "Significant Difference Across Months" if kw_p < 0.05 else "No Significant Difference Across Months"
+                        ]
+                    })
+
+                    st.dataframe(kw_result, use_container_width=True)
+
+                    monthly_avg = (
+                        stats_df.groupby("month", as_index=False)["sentiment_score"]
+                        .mean()
+                        .sort_values("month")
+                    )
+
+                    fig_kw = px.line(
+                        monthly_avg,
+                        x="month",
+                        y="sentiment_score",
+                        markers=True,
+                        title="Average Sentiment Score by Month"
+                    )
+                    st.plotly_chart(fig_kw, use_container_width=True)
+                else:
+                    st.warning("Not enough monthly groups for Kruskal-Wallis test.")
+
+            with col4:
+                st.markdown("### 4. Regression Analysis")
+
+                reg_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
+
+                if len(reg_df) >= 2:
+                    slope, intercept, r_value, p_value, std_err = linregress(
+                        reg_df["sentiment_score"],
+                        reg_df["score"]
+                    )
+
+                    r_squared = r_value ** 2
+
+                    reg_result = pd.DataFrame({
+                        "Metric": ["Slope", "Intercept", "R", "R-squared", "p-value", "Std. Error", "Interpretation"],
+                        "Value": [
+                            round(slope, 4),
+                            round(intercept, 4),
+                            round(r_value, 4),
+                            round(r_squared, 4),
+                            round(p_value, 6),
+                            round(std_err, 6),
+                            "Significant Predictor" if p_value < 0.05 else "Not a Significant Predictor"
+                        ]
+                    })
+
+                    st.dataframe(reg_result, use_container_width=True)
+
+                    fig_reg = px.scatter(
+                        reg_df,
+                        x="sentiment_score",
+                        y="score",
+                        title="Regression: Sentiment Score Predicting Rating",
+                        trendline="ols"
+                    )
+                    st.plotly_chart(fig_reg, use_container_width=True)
+
+                    st.write(
+                        f"Regression equation: Rating = {round(intercept, 4)} + ({round(slope, 4)} x Sentiment Score)"
+                    )
+                else:
+                    st.warning("Not enough data for regression analysis.")
+
         st.write(f"Skipped Reviews: {skipped_count}")
 
         st.subheader("Processed Dataset")
@@ -1045,14 +1231,14 @@ with tab_find_app:
                 download_name = safe_name(st.session_state.checked_app_id or "reviews")
 
                 st.download_button(
-                    label="Save Raw Data",
+                    label="Save",
                     data=csv_bytes,
                     file_name=f"{download_name}_reviews.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
             else:
-                st.button("Save Raw Data", disabled=True, use_container_width=True)
+                st.button("Save", disabled=True, use_container_width=True)
 
     with right_col:
         if st.session_state.checked_app_id:
