@@ -10,6 +10,7 @@ from collections import Counter
 from urllib.parse import urlparse, parse_qs
 from google_play_scraper import app, reviews, Sort
 from transformers import pipeline
+from sklearn.feature_extraction.text import CountVectorizer
 
 
 st.set_page_config(page_title="Google Play Scraper and Analysis Dashboard", layout="wide")
@@ -341,11 +342,24 @@ def prepare_analysis_df(raw_df):
 
     df["clean_text"] = df["content"].astype(str).str.lower()
     df["clean_text"] = df["clean_text"].str.replace(r"http\S+", "", regex=True)
-    df["clean_text"] = df["clean_text"].str.replace(r"[^a-zA-Z\s]", "", regex=True)
+    # MODIFIED: Preserving hyphens for Taglish morphology
+    df["clean_text"] = df["clean_text"].str.replace(r"[^a-zA-Z\s\-]", "", regex=True)
 
     if "reviewDate" in df.columns:
         df = df.dropna(subset=["reviewDate"])
         df["month"] = df["reviewDate"].dt.to_period("M").astype(str)
+
+    # NEW: TAM Lexicon Feature Engineering
+    tam_lexicon = {
+        "peou": ["lag", "crash", "bagal", "hirap", "ui", "navigate", "nag-crash", "seamless"],
+        "sys_ben": ["discount", "voucher", "tipid", "free shipping", "cashback", "sulit"],
+        "net_eff": ["dami", "marami", "trend", "sellers", "options"],
+        "out_qual": ["legit", "fake", "mali", "authentic", "refund", "return", "customer service"]
+    }
+
+    for category, keywords in tam_lexicon.items():
+        pattern = '|'.join([r'\b{}\b'.format(k) for k in keywords])
+        df[f'tam_{category}'] = df['clean_text'].str.contains(pattern, case=False, na=False).astype(int)
 
     return df
 
@@ -471,7 +485,7 @@ def process_analysis_batch():
             row_dict["sentiment_score"] = signed_score
 
             batch_rows.append(row_dict)
-            st.session_state.analysis_processed_count += 1
+        st.session_state.analysis_processed_count += 1
 
     except Exception:
         for row_dict, review_text in zip(batch_df.to_dict("records"), batch_reviews):
@@ -636,13 +650,22 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         stopwords = set(default_stopwords)
 
-        def get_top_words(dataframe):
-            text = " ".join(dataframe["content"].dropna().astype(str))
-            words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
-            filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
-            word_counts = Counter(filtered_words)
-            top_words = word_counts.most_common(30)
-            return pd.DataFrame(top_words, columns=["word", "count"])
+        # MODIFIED: Upgraded N-Gram Logic using sklearn CountVectorizer
+        def get_top_words(dataframe, n_gram_range=(1, 2)):
+            text_data = dataframe["clean_text"].dropna().astype(str).tolist()
+            if not text_data:
+                return pd.DataFrame(columns=["word", "count"])
+            
+            vectorizer = CountVectorizer(stop_words=list(stopwords), ngram_range=n_gram_range)
+            try:
+                X = vectorizer.fit_transform(text_data)
+                word_counts = X.sum(axis=0).A1
+                words = vectorizer.get_feature_names_out()
+                
+                freq_df = pd.DataFrame({'word': words, 'count': word_counts})
+                return freq_df.sort_values(by='count', ascending=False).head(30)
+            except ValueError:
+                return pd.DataFrame(columns=["word", "count"])
 
         with col1:
             st.subheader("Positive Reviews")
@@ -878,11 +901,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         # =========================
         # INFERENTIAL STATISTICS
         # =========================
-        # =========================
-        # INFERENTIAL STATISTICS
-        # NO SCIPY VERSION
-        # =========================
-        import numpy as np
+        from scipy.stats import spearmanr, chi2_contingency, kruskal, linregress
 
         st.subheader("Inferential Statistical Analysis")
 
@@ -914,103 +933,22 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
             stats_df["rating_class"] = stats_df["score"].apply(classify_rating)
 
-            # =========================
-            # HELPER FUNCTIONS
-            # =========================
-            def compute_spearman(x, y):
-                x_rank = pd.Series(x).rank()
-                y_rank = pd.Series(y).rank()
-                return x_rank.corr(y_rank)
-
-            def compute_chi_square(table):
-                observed = table.values
-                row_totals = observed.sum(axis=1, keepdims=True)
-                col_totals = observed.sum(axis=0, keepdims=True)
-                grand_total = observed.sum()
-
-                expected = (row_totals @ col_totals) / grand_total
-                chi_square = ((observed - expected) ** 2 / expected).sum()
-                dof = (observed.shape[0] - 1) * (observed.shape[1] - 1)
-
-                expected_df = pd.DataFrame(
-                    expected,
-                    index=table.index,
-                    columns=table.columns
-                )
-
-                return chi_square, dof, expected_df
-
-            def compute_kruskal_wallis(groups):
-                all_values = []
-                group_labels = []
-
-                for i, group in enumerate(groups):
-                    for val in group:
-                        all_values.append(val)
-                        group_labels.append(i)
-
-                all_values = pd.Series(all_values)
-                ranks = all_values.rank()
-
-                n_total = len(all_values)
-                h_sum = 0
-
-                for i, group in enumerate(groups):
-                    group_ranks = ranks[[j for j, g in enumerate(group_labels) if g == i]]
-                    n_i = len(group_ranks)
-                    if n_i > 0:
-                        h_sum += (group_ranks.sum() ** 2) / n_i
-
-                h_stat = (12 / (n_total * (n_total + 1))) * h_sum - 3 * (n_total + 1)
-                return h_stat
-
-            def compute_regression(x, y):
-                x = np.array(x, dtype=float)
-                y = np.array(y, dtype=float)
-
-                slope, intercept = np.polyfit(x, y, 1)
-                y_pred = slope * x + intercept
-
-                r = np.corrcoef(x, y)[0, 1]
-                r_squared = r ** 2
-
-                return slope, intercept, r, r_squared, y_pred
-
-            # =========================
-            # ROW 1
-            # =========================
             col1, col2 = st.columns(2)
 
-            # 1. Correlation Analysis
             with col1:
                 st.markdown("### 1. Correlation Analysis")
 
                 corr_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
 
                 if len(corr_df) >= 2:
-                    corr_value = compute_spearman(
-                        corr_df["sentiment_score"],
-                        corr_df["score"]
-                    )
-
-                    def interpret_corr(val):
-                        abs_val = abs(val)
-                        if abs_val >= 0.80:
-                            return "Very Strong"
-                        elif abs_val >= 0.60:
-                            return "Strong"
-                        elif abs_val >= 0.40:
-                            return "Moderate"
-                        elif abs_val >= 0.20:
-                            return "Weak"
-                        else:
-                            return "Very Weak"
+                    corr_value, corr_p = spearmanr(corr_df["sentiment_score"], corr_df["score"])
 
                     corr_result = pd.DataFrame({
-                        "Metric": ["Spearman Correlation", "Strength"],
+                        "Metric": ["Spearman Correlation", "p-value", "Interpretation"],
                         "Value": [
                             round(corr_value, 4),
-                            interpret_corr(corr_value)
+                            round(corr_p, 6),
+                            "Significant" if corr_p < 0.05 else "Not Significant"
                         ]
                     })
 
@@ -1027,20 +965,21 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough data for correlation analysis.")
 
-            # 2. Chi-square Test
             with col2:
                 st.markdown("### 2. Chi-square Test")
 
                 chi_table = pd.crosstab(stats_df["sentiment"], stats_df["rating_class"])
 
                 if chi_table.shape[0] >= 2 and chi_table.shape[1] >= 2:
-                    chi2, dof, expected_df = compute_chi_square(chi_table)
+                    chi2, p, dof, expected = chi2_contingency(chi_table)
 
                     chi_result = pd.DataFrame({
-                        "Metric": ["Chi-square", "Degrees of Freedom"],
+                        "Metric": ["Chi-square", "p-value", "Degrees of Freedom", "Interpretation"],
                         "Value": [
                             round(chi2, 4),
-                            dof
+                            round(p, 6),
+                            dof,
+                            "Significant Association" if p < 0.05 else "No Significant Association"
                         ]
                     })
 
@@ -1057,17 +996,12 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough category variation for chi-square test.")
 
-            # =========================
-            # ROW 2
-            # =========================
             col3, col4 = st.columns(2)
 
-            # 3. Kruskal-Wallis Test
             with col3:
                 st.markdown("### 3. Kruskal-Wallis Test by Month")
 
                 month_groups = []
-
                 monthly_grouped = stats_df.groupby("month")["sentiment_score"]
 
                 for month_name, values in monthly_grouped:
@@ -1076,11 +1010,15 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                         month_groups.append(clean_vals)
 
                 if len(month_groups) >= 2:
-                    kw_stat = compute_kruskal_wallis(month_groups)
+                    kw_stat, kw_p = kruskal(*month_groups)
 
                     kw_result = pd.DataFrame({
-                        "Metric": ["Kruskal-Wallis Statistic"],
-                        "Value": [round(kw_stat, 4)]
+                        "Metric": ["Kruskal-Wallis Statistic", "p-value", "Interpretation"],
+                        "Value": [
+                            round(kw_stat, 4),
+                            round(kw_p, 6),
+                            "Significant Difference Across Months" if kw_p < 0.05 else "No Significant Difference Across Months"
+                        ]
                     })
 
                     st.dataframe(kw_result, use_container_width=True)
@@ -1102,25 +1040,29 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough monthly groups for Kruskal-Wallis test.")
 
-            # 4. Regression Analysis
             with col4:
                 st.markdown("### 4. Regression Analysis")
 
                 reg_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
 
                 if len(reg_df) >= 2:
-                    slope, intercept, r_value, r_squared, y_pred = compute_regression(
+                    slope, intercept, r_value, p_value, std_err = linregress(
                         reg_df["sentiment_score"],
                         reg_df["score"]
                     )
 
+                    r_squared = r_value ** 2
+
                     reg_result = pd.DataFrame({
-                        "Metric": ["Slope", "Intercept", "R", "R-squared"],
+                        "Metric": ["Slope", "Intercept", "R", "R-squared", "p-value", "Std. Error", "Interpretation"],
                         "Value": [
                             round(slope, 4),
                             round(intercept, 4),
                             round(r_value, 4),
-                            round(r_squared, 4)
+                            round(r_squared, 4),
+                            round(p_value, 6),
+                            round(std_err, 6),
+                            "Significant Predictor" if p_value < 0.05 else "Not a Significant Predictor"
                         ]
                     })
 
@@ -1140,11 +1082,12 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                     )
                 else:
                     st.warning("Not enough data for regression analysis.")
-                    
+
         st.write(f"Skipped Reviews: {skipped_count}")
 
         st.subheader("Processed Dataset")
 
+        # MODIFIED: Included the new TAM feature columns in the final downloadable output
         final_columns = [
             "reviewId",
             "reviewDate",
@@ -1155,7 +1098,11 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             "sentiment_score",
             "sentiment",
             "actual_label",
-            "reviewWordCount"
+            "reviewWordCount",
+            "tam_peou",
+            "tam_sys_ben",
+            "tam_net_eff",
+            "tam_out_qual"
         ]
 
         final_columns = [col for col in final_columns if col in df_valid.columns]
