@@ -542,6 +542,7 @@ def process_analysis_batch():
 
 
 def show_analysis_results(df_valid, checkpoint_df=None):
+    # TITLE ONLY SHOWS IF NOT ANALYZING
     st.title("Analysis Dashboard")
 
     try:
@@ -1018,7 +1019,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough data for regression analysis.")
 
-        # TOP 200 WORDS BY SENTIMENT AS LISTS (EXCEL-LIKE)
         st.subheader("Top 200 Words by Sentiment")
 
         col1, col2 = st.columns(2)
@@ -1292,137 +1292,69 @@ with tab_load_files:
                 st.rerun()
 
 with tab_processed_data:
-    if st.session_state.analysis_done or st.session_state.analysis_raw_df is not None:
+    # PROCESSED DATA ONLY SHOWS THE TABLE
+    if st.session_state.analysis_done or st.session_state.analysis_processed_parts:
         st.subheader("Processed Dataset")
+        final_df = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True) if st.session_state.analysis_processed_parts else None
         
-        # COMBINE PROCESSED DATA
-        if st.session_state.analysis_processed_parts:
-            final_df = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True)
-            
-            # PREPARE COLUMNS FOR DISPLAY
+        if final_df is not None and not final_df.empty:
             final_columns = [
-                "reviewId",
-                "reviewDate",
-                "content",
-                "score",
-                "roberta_label",
-                "roberta_score",
-                "sentiment_score",
-                "sentiment",
-                "actual_label",
-                "reviewWordCount"
+                "reviewId", "reviewDate", "content", "score", "roberta_label",
+                "roberta_score", "sentiment_score", "sentiment", "actual_label", "reviewWordCount"
             ]
-            
             available_columns = [col for col in final_columns if col in final_df.columns]
-            display_df = final_df[available_columns].copy()
+            final_df = final_df[available_columns].copy()
+            if "reviewDate" in final_df.columns:
+                final_df["reviewDate"] = pd.to_datetime(final_df["reviewDate"], errors="coerce")
+                final_df = final_df.sort_values(by="reviewDate", ascending=False)
 
-            if "reviewDate" in display_df.columns:
-                display_df = display_df.sort_values(by="reviewDate", ascending=False)
-
-            st.dataframe(display_df, use_container_width=True)
-
-            csv = display_df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="Download Processed Data",
-                data=csv,
-                file_name="processed_reviews.csv",
-                mime="text/csv"
-            )
+            st.dataframe(final_df, use_container_width=True)
+            csv = final_df.to_csv(index=False).encode("utf-8")
+            st.download_button(label="Download Processed Data", data=csv, file_name="processed_reviews.csv", mime="text/csv")
 
 if st.session_state.scraping and not st.session_state.cancel_requested:
     current_item = get_current_plan_item()
-
     if current_item is None:
         st.session_state.scraping = False
         st.session_state.scrape_done = True
         st.rerun()
-
     try:
         batch, new_token = reviews(
-            st.session_state.checked_app_id,
-            lang="en",
-            country=current_item["country"],
-            sort=current_item["sort_value"],
-            count=COUNT_PER_BATCH,
-            continuation_token=st.session_state.current_token
+            st.session_state.checked_app_id, lang="en",
+            country=current_item["country"], sort=current_item["sort_value"],
+            count=COUNT_PER_BATCH, continuation_token=st.session_state.current_token
         )
-
         added_count = add_new_reviews(batch)
         st.session_state.batch_index += 1
         st.session_state.current_query_rounds += 1
-
-        current_total = len(st.session_state.all_reviews)
-        reported_total = st.session_state.total_reviews_reported or 0
-        st.session_state.corrected_total_reviews = max(reported_total, current_total)
-
-        empty_batch = len(batch) == 0
-        same_token = new_token == st.session_state.current_token
-
-        if empty_batch or added_count == 0 or same_token:
+        st.session_state.current_token = new_token
+        if len(batch) == 0 or added_count == 0 or new_token == st.session_state.current_token:
             st.session_state.current_stagnant_rounds += 1
         else:
             st.session_state.current_stagnant_rounds = 0
-
-        st.session_state.current_token = new_token
-
-        should_advance = (
-            new_token is None
-            or st.session_state.current_stagnant_rounds >= 2
-            or st.session_state.current_query_rounds >= SCRAPE_MAX_ROUNDS_PER_QUERY
-        )
-
-        if should_advance:
+        if new_token is None or st.session_state.current_stagnant_rounds >= 2 or st.session_state.current_query_rounds >= SCRAPE_MAX_ROUNDS_PER_QUERY:
             st.session_state.current_plan_index += 1
             st.session_state.current_token = None
             st.session_state.current_query_rounds = 0
             st.session_state.current_stagnant_rounds = 0
-
-        time.sleep(0.05)
-        st.rerun()
-
+        time.sleep(0.05); st.rerun()
     except Exception as e:
-        st.error(f"Scraping error: {e}")
-        st.session_state.scraping = False
-
-
-if st.session_state.scrape_done:
-    final_total = len(st.session_state.all_reviews)
-    st.session_state.corrected_total_reviews = max(
-        st.session_state.total_reviews_reported or 0,
-        final_total
-    )
+        st.error(f"Scraping error: {e}"); st.session_state.scraping = False
 
 if st.session_state.analysis_running or st.session_state.download_checkpoint_ready:
-    overall_done = (
-        st.session_state.analysis_existing_processed
-        + st.session_state.analysis_processed_count
-    )
+    overall_done = st.session_state.analysis_existing_processed + st.session_state.analysis_processed_count
     total_reviews = st.session_state.analysis_total_reviews
-    skipped_count = st.session_state.analysis_skipped_count
-
-    st.subheader("Analysis Dashboard")
-    progress_ratio = overall_done / total_reviews if total_reviews > 0 else 0
-    st.progress(progress_ratio)
-    st.write(f"{overall_done} out of {total_reviews} processed. {skipped_count} skipped.")
-
-    if st.session_state.download_checkpoint_ready:
-        st.info("Processing paused. Click Resume to continue.")
-
-if st.session_state.analysis_running and not st.session_state.analysis_paused:
-    process_analysis_batch()
-    time.sleep(0.05)
-    st.rerun()
+    st.subheader("Analysis Progress") # ONLY SHOW PROGRESS BAR
+    st.progress(overall_done / total_reviews if total_reviews > 0 else 0)
+    st.write(f"{overall_done} out of {total_reviews} processed. {st.session_state.analysis_skipped_count} skipped.")
+    if st.session_state.analysis_running and not st.session_state.analysis_paused:
+        process_analysis_batch(); time.sleep(0.05); st.rerun()
 
 if st.session_state.analysis_done:
-    df_valid = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True)
+    df_final = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True)
     st.session_state.analysis_done = False
     st.session_state.download_checkpoint_ready = False
-    show_analysis_results(df_valid)
+    show_analysis_results(df_final)
 
 if st.session_state.cancel_requested:
-    partial_total = len(st.session_state.all_reviews)
-    st.session_state.corrected_total_reviews = max(
-        st.session_state.total_reviews_reported or 0,
-        partial_total
-    )
-    st.warning(f"Scraping cancelled. Partial unique reviews extracted: {partial_total:,}")
+    st.warning(f"Scraping cancelled. Partial unique reviews extracted: {len(st.session_state.all_reviews):,}")
