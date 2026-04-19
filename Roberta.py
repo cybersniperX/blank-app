@@ -39,7 +39,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 SORT_OPTIONS = [
-    ("Newest", Sort.NEWEST),
+    ("Newest", Sort.NEWEST [cite: 2]),
 ]
 
 COUNTRY_OPTIONS = ["ph"]
@@ -71,7 +71,7 @@ def clear_saved_checkpoints():
         "*checkpoint*.csv",
     ]
 
-    for pattern in checkpoint_patterns:
+    for pattern in checkpoint_patterns[cite: 3]:
         for file_path in glob.glob(pattern):
             try:
                 os.remove(file_path)
@@ -81,7 +81,7 @@ def clear_saved_checkpoints():
     if os.path.exists(CHECKPOINT_DIR):
         for file_path in glob.glob(os.path.join(CHECKPOINT_DIR, "*.csv")):
             try:
-                os.remove(file_path)
+                os.remove(file_path) [cite: 4]
             except Exception:
                 pass
 
@@ -96,7 +96,7 @@ def reset_analysis_state():
     st.session_state.analysis_total_reviews = 0
     st.session_state.analysis_existing_processed = 0
     st.session_state.analysis_processed_count = 0
-    st.session_state.analysis_skipped_count = 0
+    st.session_state.analysis_skipped_count = 0 [cite: 5]
     st.session_state.analysis_app_id = None
     st.session_state.analysis_source_id = None
     st.session_state.download_checkpoint_ready = False
@@ -110,7 +110,7 @@ def format_time(seconds):
         sec = max(1, round(seconds))
         return f"{sec} second" if sec == 1 else f"{sec} seconds"
     mins = max(1, round(seconds / 60))
-    return f"{mins} minute" if mins == 1 else f"{mins} minutes"
+    return f"{mins} minute" if mins == 1 else f"{mins} minutes" [cite: 6]
 
 
 def extract_app_id_from_input(value):
@@ -129,7 +129,7 @@ def extract_app_id_from_input(value):
 
 
 def build_query_plan():
-    plan = []
+    plan = [] [cite: 7]
     for country in COUNTRY_OPTIONS:
         for sort_name, sort_value in SORT_OPTIONS:
             plan.append({
@@ -137,7 +137,7 @@ def build_query_plan():
                 "sort_name": sort_name,
                 "sort_value": sort_value,
             })
-    return plan
+    return plan [cite: 8]
 
 
 def reset_scrape_state():
@@ -156,7 +156,7 @@ def reset_scrape_state():
     st.session_state.scrapable_reviews = None
     st.session_state.estimated_time_low = None
     st.session_state.estimated_time_high = None
-    st.session_state.corrected_total_reviews = st.session_state.total_reviews_reported or 0
+    st.session_state.corrected_total_reviews = st.session_state.total_reviews_reported or 0 [cite: 9]
     st.session_state.run_analysis_from_scrape = False
     reset_analysis_state()
 
@@ -178,7 +178,7 @@ def restart_app_state():
     keys_to_clear = [
         "checked_app_id",
         "checked_app_title",
-        "checked_app_icon",
+        "checked_app_icon", [cite: 10]
         "total_reviews_reported",
         "corrected_total_reviews",
         "scrapable_reviews",
@@ -191,7 +191,7 @@ def restart_app_state():
         "all_reviews",
         "batch_index",
         "scrape_start",
-        "app_input",
+        "app_input", [cite: 11]
         "loading_app",
         "auto_download_ready",
         "current_plan_index",
@@ -203,7 +203,7 @@ def restart_app_state():
         "run_analysis_from_scrape",
         "analysis_running",
         "analysis_paused",
-        "analysis_done",
+        "analysis_done", [cite: 12]
         "analysis_raw_df",
         "analysis_processed_parts",
         "analysis_remaining_df",
@@ -217,7 +217,7 @@ def restart_app_state():
         "analysis_pause_requested",
     ]
 
-    for key in keys_to_clear:
+    for key in keys_to_clear[cite: 13]:
         if key in st.session_state:
             del st.session_state[key]
 
@@ -237,7 +237,7 @@ def load_app_details():
     st.session_state.loading_app = True
 
     try:
-        load_progress = st.progress(0)
+        load_progress = st.progress(0) [cite: 14]
         load_status = st.empty()
 
         load_status.text("Loading app details...")
@@ -253,7 +253,7 @@ def load_app_details():
         load_progress.empty()
         load_status.empty()
 
-        st.session_state.checked_app_id = app_id
+        st.session_state.checked_app_id = app_id [cite: 15]
         st.session_state.checked_app_title = result.get("title", app_id)
         st.session_state.checked_app_icon = result.get("icon")
         st.session_state.total_reviews_reported = reported_total_reviews
@@ -267,7 +267,7 @@ def load_app_details():
 
 
 def get_current_plan_item():
-    plan = build_query_plan()
+    plan = build_query_plan() [cite: 16]
     if st.session_state.current_plan_index >= len(plan):
         return None
     return plan[st.session_state.current_plan_index]
@@ -277,7 +277,7 @@ def add_new_reviews(batch):
     added = 0
     for row in batch:
         rid = row.get("reviewId")
-        # --- MODIFICATION 1: EXCLUDE REVIEWS OLDER THAN 2024 ---
+        # EXCLUDE REVIEWS OLDER THAN 2024
         review_at = row.get("at")
         is_post_2024 = True
         if review_at and hasattr(review_at, 'year'):
@@ -287,7 +287,7 @@ def add_new_reviews(batch):
         if rid and rid not in st.session_state.seen_review_ids and is_post_2024:
             st.session_state.seen_review_ids.add(rid)
             st.session_state.all_reviews.append(row)
-            added += 1
+            added += 1 [cite: 17]
     return added
 
 
@@ -306,7 +306,7 @@ def get_sentiment_score(mapped_label, confidence_score):
         return float(confidence_score)
     elif mapped_label == "negative":
         return -float(confidence_score)
-    else:
+    else: [cite: 18]
         return 0.0
 
 
@@ -324,7 +324,7 @@ def prepare_analysis_df(raw_df):
         st.error("The uploaded raw file does not contain a 'content' column.")
         st.stop()
 
-    if "reviewId" not in df.columns:
+    if "reviewId" not in df.columns: [cite: 19]
         st.error("The uploaded raw file does not contain a 'reviewId' column.")
         st.stop()
 
@@ -336,7 +336,7 @@ def prepare_analysis_df(raw_df):
 
     if "score" not in df.columns:
         st.error("The uploaded raw file does not contain a 'score' column.")
-        st.stop()
+        st.stop() [cite: 20]
 
     df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
@@ -359,7 +359,7 @@ def prepare_analysis_df(raw_df):
 
 def prepare_checkpoint_df(checkpoint_df):
     if checkpoint_df is None:
-        return None
+        return None [cite: 21]
 
     df = checkpoint_df.copy()
 
@@ -385,7 +385,7 @@ def save_latest_checkpoint(df, source_id):
 
 def load_latest_checkpoint(source_id):
     checkpoint_path = get_checkpoint_path(source_id)
-    if os.path.exists(checkpoint_path):
+    if os.path.exists(checkpoint_path): [cite: 22]
         try:
             return pd.read_csv(checkpoint_path)
         except Exception:
@@ -404,7 +404,7 @@ def start_analysis(raw_df, checkpoint_df=None, source_id=None):
 
     if source_id is None:
         source_id = get_analysis_source_id(
-            app_id=st.session_state.get("checked_app_id"),
+            app_id=st.session_state.get("checked_app_id"), [cite: 23]
             raw_filename=None
         )
 
@@ -419,7 +419,7 @@ def start_analysis(raw_df, checkpoint_df=None, source_id=None):
     if checkpoint_df is not None and not checkpoint_df.empty:
         done_ids = set(checkpoint_df["reviewId"].dropna().astype(str))
         remaining_df = df[~df["reviewId"].isin(done_ids)].copy()
-        processed_parts.append(checkpoint_df)
+        processed_parts.append(checkpoint_df) [cite: 24]
         existing_processed = len(checkpoint_df)
     else:
         remaining_df = df.copy()
@@ -436,7 +436,7 @@ def start_analysis(raw_df, checkpoint_df=None, source_id=None):
     st.session_state.analysis_skipped_count = 0
     st.session_state.analysis_app_id = st.session_state.get("checked_app_id")
     st.session_state.analysis_source_id = source_id
-    st.session_state.download_checkpoint_ready = False
+    st.session_state.download_checkpoint_ready = False [cite: 25]
     st.session_state.analysis_pause_requested = False
 
 
@@ -459,7 +459,7 @@ def process_analysis_batch():
     batch_reviews = batch_df["content"].astype(str).tolist()
     batch_rows = []
 
-    try:
+    try: [cite: 26]
         batch_results = sentiment_model(
             batch_reviews,
             truncation=True,
@@ -469,7 +469,7 @@ def process_analysis_batch():
         for row_dict, r in zip(batch_df.to_dict("records"), batch_results):
             raw_label = r["label"]
             raw_score = r["score"]
-            mapped_label = map_roberta_label(raw_label)
+            mapped_label = map_roberta_label(raw_label) [cite: 27]
             signed_score = get_sentiment_score(mapped_label, raw_score)
 
             row_dict["roberta_label"] = raw_label
@@ -478,7 +478,7 @@ def process_analysis_batch():
             row_dict["sentiment_score"] = signed_score
 
             batch_rows.append(row_dict)
-        st.session_state.analysis_processed_count += 1
+        st.session_state.analysis_processed_count += 1 [cite: 28]
 
     except Exception:
         for row_dict, review_text in zip(batch_df.to_dict("records"), batch_reviews):
@@ -486,13 +486,13 @@ def process_analysis_batch():
                 single_result = sentiment_model(
                     [review_text],
                     truncation=True,
-                    max_length=ROBERTA_MAX_LENGTH
+                    max_length=ROBERTA_MAX_LENGTH [cite: 29]
                 )[0]
 
                 raw_label = single_result["label"]
                 raw_score = single_result["score"]
                 mapped_label = map_roberta_label(raw_label)
-                signed_score = get_sentiment_score(mapped_label, raw_score)
+                signed_score = get_sentiment_score(mapped_label, raw_score) [cite: 30]
 
                 row_dict["roberta_label"] = raw_label
                 row_dict["roberta_score"] = raw_score
@@ -500,14 +500,14 @@ def process_analysis_batch():
                 row_dict["sentiment_score"] = signed_score
 
             except Exception:
-                row_dict["roberta_label"] = "SKIPPED"
+                row_dict["roberta_label"] = "SKIPPED" [cite: 31]
                 row_dict["roberta_score"] = None
                 row_dict["sentiment"] = "skipped"
                 row_dict["sentiment_score"] = None
                 st.session_state.analysis_skipped_count += 1
 
             batch_rows.append(row_dict)
-        st.session_state.analysis_processed_count += 1
+        st.session_state.analysis_processed_count += 1 [cite: 32]
 
     st.session_state.analysis_processed_parts.append(pd.DataFrame(batch_rows))
     st.session_state.analysis_remaining_df = next_remaining_df
@@ -522,7 +522,7 @@ def process_analysis_batch():
             st.session_state.analysis_processed_parts,
             ignore_index=True
         )
-        save_latest_checkpoint(current_checkpoint_df, st.session_state.analysis_source_id)
+        save_latest_checkpoint(current_checkpoint_df, st.session_state.analysis_source_id) [cite: 33]
 
     if st.session_state.analysis_pause_requested:
         current_checkpoint_df = pd.concat(
@@ -533,7 +533,7 @@ def process_analysis_batch():
         st.session_state.analysis_running = False
         st.session_state.analysis_paused = True
         st.session_state.analysis_pause_requested = False
-        st.session_state.download_checkpoint_ready = True
+        st.session_state.download_checkpoint_ready = True [cite: 34]
         return
 
     if st.session_state.analysis_remaining_df.empty:
@@ -551,7 +551,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         df_valid = df_valid[df_valid["sentiment"] != "skipped"].copy()
 
         if df_valid.empty:
-            st.error("No reviews were successfully processed by RoBERTa.")
+            st.error("No reviews were successfully processed by RoBERTa.") [cite: 35]
             st.stop()
 
         def actual_label(score):
@@ -559,7 +559,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 return "positive"
             elif score <= 2:
                 return "negative"
-            else:
+            else: [cite: 36]
                 return "neutral"
 
         df_valid["actual_label"] = df_valid["score"].apply(actual_label)
@@ -568,7 +568,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         if "reviewDate" in df_valid.columns:
             df_valid["reviewDate"] = pd.to_datetime(df_valid["reviewDate"], errors="coerce")
             df_valid = df_valid.dropna(subset=["reviewDate"])
-            df_valid["month_period"] = df_valid["reviewDate"].dt.to_period("M")
+            df_valid["month_period"] = df_valid["reviewDate"].dt.to_period("M") [cite: 37]
             df_valid["month"] = df_valid["month_period"].astype(str)
 
         st.subheader("Summary")
@@ -581,7 +581,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         total = sent_summary["total_count"].sum()
         sent_summary["weighted"] = (sent_summary["total_count"] / total * 100).round(2)
-        sent_summary = sent_summary.sort_values(by="weighted", ascending=False)
+        sent_summary = sent_summary.sort_values(by="weighted", ascending=False) [cite: 38]
 
         with col1:
             st.markdown("### Sentiment Summary")
@@ -593,7 +593,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         total = class_summary["total_count"].sum()
         class_summary["weighted"] = (class_summary["total_count"] / total * 100).round(2)
-        class_summary = class_summary.sort_values(by="weighted", ascending=False)
+        class_summary = class_summary.sort_values(by="weighted", ascending=False) [cite: 39]
 
         with col2:
             st.markdown("### Classified Summary")
@@ -604,7 +604,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         if "reviewDate" in df_valid.columns:
             monthly_summary = df_valid.groupby(["month_period", "month"]).agg(
-                avg_rating=("score", "mean"),
+                avg_rating=("score", "mean"), [cite: 40]
                 review_count=("score", "count")
             ).reset_index()
 
@@ -614,24 +614,21 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             top_10_highest = monthly_summary.sort_values(by="avg_rating", ascending=False).head(10)
             top_10_lowest = monthly_summary.sort_values(by="avg_rating", ascending=True).head(10)
 
-            col1, col2 = st.columns(2)
+            col1, col2 = st.columns(2) [cite: 41]
 
             with col1:
                 st.subheader("Top 10 Highest Rated Months")
                 st.dataframe(
                     top_10_highest[["month", "avg_rating", "review_count"]],
-                    use_container_width=True
+                    use_container_width=True [cite: 42]
                 )
 
             with col2:
                 st.subheader("Top 10 Lowest Rated Months")
                 st.dataframe(
                     top_10_lowest[["month", "avg_rating", "review_count"]],
-                    use_container_width=True
+                    use_container_width=True [cite: 43]
                 )
-
-        # Removed Word charts from original position
-        # st.subheader("Top 30 Words by Sentiment") - MODIFIED
 
         st.subheader("Sentiment")
 
@@ -644,7 +641,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         )
         fig_bar.update_traces(textposition="outside")
 
-        fig_pie = px.pie(
+        fig_pie = px.pie( [cite: 50]
             summary,
             names="sentiment",
             values="total_count",
@@ -654,7 +651,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         heatmap = df_valid.groupby(["month", "sentiment"]).size().reset_index(name="count")
         pivot = heatmap.pivot(index="sentiment", columns="month", values="count").fillna(0)
 
-        fig_heatmap = px.imshow(
+        fig_heatmap = px.imshow( [cite: 51]
             pivot,
             text_auto=True,
             aspect="auto",
@@ -665,7 +662,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         with col1:
             st.plotly_chart(fig_bar, use_container_width=True)
         with col2:
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, use_container_width=True) [cite: 52]
         with col3:
             st.plotly_chart(fig_heatmap, use_container_width=True)
 
@@ -677,7 +674,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         fig_actual_bar = px.bar(
             actual_summary,
             x="actual_label",
-            y="total_count",
+            y="total_count", [cite: 53]
             text="total_count",
             title="Count of Classified Labels"
         )
@@ -687,7 +684,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             actual_summary,
             names="actual_label",
             values="total_count",
-            title="Classified Label Distribution"
+            title="Classified Label Distribution" [cite: 54]
         )
 
         actual_heatmap = df_valid.groupby(["month", "actual_label"]).size().reset_index(name="count")
@@ -697,7 +694,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             values="count"
         ).fillna(0)
 
-        fig_actual_heatmap = px.imshow(
+        fig_actual_heatmap = px.imshow( [cite: 55]
             actual_pivot,
             text_auto=True,
             aspect="auto",
@@ -708,7 +705,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         with col1:
             st.plotly_chart(fig_actual_bar, use_container_width=True)
         with col2:
-            st.plotly_chart(fig_actual_pie, use_container_width=True)
+            st.plotly_chart(fig_actual_pie, use_container_width=True) [cite: 56]
         with col3:
             st.plotly_chart(fig_actual_heatmap, use_container_width=True)
 
@@ -719,7 +716,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             rating_trend,
             x="month",
             y="score",
-            title="Average Review Score Over Time"
+            title="Average Review Score Over Time" [cite: 57]
         )
 
         volume = df_valid.groupby("month").size().reset_index(name="count")
@@ -730,7 +727,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             title="Review Volume Over Time"
         )
 
-        avg_sent = df_valid.groupby("month")["sentiment_score"].mean().reset_index()
+        avg_sent = df_valid.groupby("month")["sentiment_score"].mean().reset_index() [cite: 58]
         fig_avg = px.line(
             avg_sent,
             x="month",
@@ -740,7 +737,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.plotly_chart(fig_rating, use_container_width=True)
+            st.plotly_chart(fig_rating, use_container_width=True) [cite: 59]
         with col2:
             st.plotly_chart(fig_volume, use_container_width=True)
         with col3:
@@ -752,7 +749,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         fig_length = px.box(
             df_valid,
-            x="score",
+            x="score", [cite: 60]
             y="reviewWordCount",
             title="Review Length by Rating"
         )
@@ -762,7 +759,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         fig_scatter = px.scatter(
             df_valid,
             x="score",
-            y="reviewWordCount",
+            y="reviewWordCount", [cite: 61]
             color="sentiment",
             title="Review Length vs Rating",
             opacity=0.6
@@ -772,7 +769,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         st.subheader("Predicted vs Actual")
 
-        cm_df = pd.crosstab(
+        cm_df = pd.crosstab( [cite: 62]
             df_valid["actual_label"],
             df_valid["sentiment"],
             rownames=["Actual"],
@@ -783,7 +780,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         with col1:
             st.markdown("### Confusion Matrix (Table)")
-            st.dataframe(cm_df, use_container_width=True)
+            st.dataframe(cm_df, use_container_width=True) [cite: 63]
 
         labels = ["positive", "neutral", "negative"]
         report = []
@@ -793,12 +790,12 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             fp = ((df_valid["actual_label"] != label) & (df_valid["sentiment"] == label)).sum()
             fn = ((df_valid["actual_label"] == label) & (df_valid["sentiment"] != label)).sum()
 
-            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0 [cite: 64]
             recall = tp / (tp + fn) if (tp + fn) > 0 else 0
             f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
 
             report.append({
-                "label": label,
+                "label": label, [cite: 65]
                 "precision": round(precision, 3),
                 "recall": round(recall, 3),
                 "f1_score": round(f1, 3)
@@ -807,7 +804,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         report_df = pd.DataFrame(report)
 
         with col2:
-            st.markdown("### Classification Report")
+            st.markdown("### Classification Report") [cite: 66]
             st.dataframe(report_df, use_container_width=True)
 
         fig_cm = px.imshow(
@@ -818,7 +815,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         )
 
         rating_sentiment = df_valid.groupby("score")["sentiment_score"].mean().reset_index()
-        fig = px.line(
+        fig = px.line( [cite: 67]
             rating_sentiment,
             x="score",
             y="sentiment_score",
@@ -827,7 +824,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         col1, col2 = st.columns(2)
         with col1:
-            st.plotly_chart(fig_cm, use_container_width=True)
+            st.plotly_chart(fig_cm, use_container_width=True) [cite: 68]
         with col2:
             st.plotly_chart(fig, use_container_width=True)
 
@@ -841,7 +838,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         # =========================
         from scipy.stats import spearmanr, chi2_contingency, kruskal, linregress
 
-        st.subheader("Inferential Statistical Analysis")
+        st.subheader("Inferential Statistical Analysis") [cite: 69]
 
         stats_df = df_valid.copy()
 
@@ -852,7 +849,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             st.error(f"Missing required columns: {missing_cols}")
         else:
             stats_df["score"] = pd.to_numeric(stats_df["score"], errors="coerce")
-            stats_df["sentiment_score"] = pd.to_numeric(stats_df["sentiment_score"], errors="coerce")
+            stats_df["sentiment_score"] = pd.to_numeric(stats_df["sentiment_score"], errors="coerce") [cite: 70]
             stats_df["reviewDate"] = pd.to_datetime(stats_df["reviewDate"], errors="coerce")
 
             stats_df = stats_df.dropna(
@@ -862,12 +859,12 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             stats_df["month"] = stats_df["reviewDate"].dt.to_period("M").astype(str)
 
             def classify_rating(score):
-                if score in [4, 5]:
+                if score in [4, 5]: [cite: 71]
                     return "positive"
                 elif score == 3:
                     return "neutral"
                 else:
-                    return "negative"
+                    return "negative" [cite: 72]
 
             stats_df["rating_class"] = stats_df["score"].apply(classify_rating)
 
@@ -878,32 +875,32 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
                 corr_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
 
-                if len(corr_df) >= 2:
+                if len(corr_df) >= 2: [cite: 73]
                     corr_value, corr_p = spearmanr(corr_df["sentiment_score"], corr_df["score"])
 
                     corr_result = pd.DataFrame({
                         "Metric": ["Spearman Correlation", "p-value", "Interpretation"],
-                        "Value": [
+                        "Value": [ [cite: 74]
                             round(corr_value, 4),
                             round(corr_p, 6),
-                            "Significant" if corr_p < 0.05 else "Not Significant"
+                            "Significant" if corr_p < 0.05 else "Not Significant" [cite: 75]
                         ]
                     })
 
                     st.dataframe(corr_result, use_container_width=True)
 
                     fig_corr = px.scatter(
-                        corr_df,
+                        corr_df, [cite: 76]
                         x="sentiment_score",
                         y="score",
                         title="Sentiment Score vs Star Rating",
-                        trendline="ols"
+                        trendline="ols" [cite: 77]
                     )
                     st.plotly_chart(fig_corr, use_container_width=True)
                 else:
                     st.warning("Not enough data for correlation analysis.")
 
-            with col2:
+            with col2: [cite: 78]
                 st.markdown("### 2. Chi-square Test")
 
                 chi_table = pd.crosstab(stats_df["sentiment"], stats_df["rating_class"])
@@ -911,30 +908,30 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 if chi_table.shape[0] >= 2 and chi_table.shape[1] >= 2:
                     chi2, p, dof, expected = chi2_contingency(chi_table)
 
-                    chi_result = pd.DataFrame({
+                    chi_result = pd.DataFrame({ [cite: 79]
                         "Metric": ["Chi-square", "p-value", "Degrees of Freedom", "Interpretation"],
                         "Value": [
-                            round(chi2, 4),
+                            round(chi2, 4), [cite: 80]
                             round(p, 6),
                             dof,
                             "Significant Association" if p < 0.05 else "No Significant Association"
-                        ]
+                        ] [cite: 81]
                     })
 
                     st.dataframe(chi_result, use_container_width=True)
                     st.dataframe(chi_table, use_container_width=True)
 
-                    fig_chi = px.imshow(
+                    fig_chi = px.imshow( [cite: 82]
                         chi_table,
                         text_auto=True,
                         aspect="auto",
-                        title="Sentiment Class vs Rating Class"
+                        title="Sentiment Class vs Rating Class" [cite: 83]
                     )
                     st.plotly_chart(fig_chi, use_container_width=True)
                 else:
                     st.warning("Not enough category variation for chi-square test.")
 
-            col3, col4 = st.columns(2)
+            col3, col4 = st.columns(2) [cite: 84]
 
             with col3:
                 st.markdown("### 3. Kruskal-Wallis Test by Month")
@@ -943,127 +940,117 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 monthly_grouped = stats_df.groupby("month")["sentiment_score"]
 
                 for month_name, values in monthly_grouped:
-                    clean_vals = values.dropna().tolist()
+                    clean_vals = values.dropna().tolist() [cite: 85]
                     if len(clean_vals) > 0:
                         month_groups.append(clean_vals)
 
                 if len(month_groups) >= 2:
-                    kw_stat, kw_p = kruskal(*month_groups)
+                    kw_stat, kw_p = kruskal(*month_groups) [cite: 86]
 
                     kw_result = pd.DataFrame({
                         "Metric": ["Kruskal-Wallis Statistic", "p-value", "Interpretation"],
                         "Value": [
-                            round(kw_stat, 4),
+                            round(kw_stat, 4), [cite: 87]
                             round(kw_p, 6),
                             "Significant Difference Across Months" if kw_p < 0.05 else "No Significant Difference Across Months"
-                        ]
+                        ] [cite: 88]
                     })
 
                     st.dataframe(kw_result, use_container_width=True)
 
                     monthly_avg = (
                         stats_df.groupby("month", as_index=False)["sentiment_score"]
-                        .mean()
+                        .mean() [cite: 89]
                         .sort_values("month")
                     )
 
                     fig_kw = px.line(
-                        monthly_avg,
+                        monthly_avg, [cite: 90]
                         x="month",
                         y="sentiment_score",
                         markers=True,
-                        title="Average Sentiment Score by Month"
+                        title="Average Sentiment Score by Month" [cite: 91]
                     )
                     st.plotly_chart(fig_kw, use_container_width=True)
                 else:
                     st.warning("Not enough monthly groups for Kruskal-Wallis test.")
 
-            with col4:
+            with col4: [cite: 92]
                 st.markdown("### 4. Regression Analysis")
 
                 reg_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
 
                 if len(reg_df) >= 2:
                     slope, intercept, r_value, p_value, std_err = linregress(
-                        reg_df["sentiment_score"],
+                        reg_df["sentiment_score"], [cite: 93]
                         reg_df["score"]
                     )
 
                     r_squared = r_value ** 2
 
                     reg_result = pd.DataFrame({
-                        "Metric": ["Slope", "Intercept", "R", "R-squared", "p-value", "Std. Error", "Interpretation"],
+                        "Metric": ["Slope", "Intercept", "R", "R-squared", "p-value", "Std. Error", "Interpretation"], [cite: 94, 95]
                         "Value": [
                             round(slope, 4),
                             round(intercept, 4),
-                            round(r_value, 4),
+                            round(r_value, 4), [cite: 96]
                             round(r_squared, 4),
                             round(p_value, 6),
-                            round(std_err, 6),
+                            round(std_err, 6), [cite: 97]
                             "Significant Predictor" if p_value < 0.05 else "Not a Significant Predictor"
                         ]
                     })
 
-                    st.dataframe(reg_result, use_container_width=True)
+                    st.dataframe(reg_result, use_container_width=True) [cite: 98]
 
                     fig_reg = px.scatter(
                         reg_df,
                         x="sentiment_score",
                         y="score",
-                        title="Regression: Sentiment Score Predicting Rating",
+                        title="Regression: Sentiment Score Predicting Rating", [cite: 99]
                         trendline="ols"
                     )
                     st.plotly_chart(fig_reg, use_container_width=True)
 
-                    st.write(
+                    st.write( [cite: 100]
                         f"Regression equation: Rating = {round(intercept, 4)} + ({round(slope, 4)} x Sentiment Score)"
                     )
                 else:
-                    st.warning("Not enough data for regression analysis.")
+                    st.warning("Not enough data for regression analysis.") [cite: 101]
 
-        # --- MODIFICATION 2: TOP 200 WORDS AT THE BOTTOM ---
+        # TOP 200 WORDS BY SENTIMENT AS LISTS (EXCEL-LIKE)
         st.subheader("Top 200 Words by Sentiment")
+
         col1, col2 = st.columns(2)
 
         default_stopwords = [
             "the", "and", "is", "to", "of", "in", "for", "on", "with", "this",
-            "that", "it", "my", "app", "very", "so", "but", "are", "was", "be",
+            "that", "it", "my", "app", "very", "so", "but", "are", "was", "be", [cite: 44]
             "have", "has", "had", "not", "at", "you", "we", "they", "i", "ang",
             "nag", "your", "nyo"
         ]
+
         stopwords = set(default_stopwords)
 
         def get_top_words(dataframe):
             text = " ".join(dataframe["content"].dropna().astype(str))
             words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
-            filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
+            filtered_words = [w for w in words if w not in stopwords and len(w) > 2] [cite: 45]
             word_counts = Counter(filtered_words)
-            top_words = word_counts.most_common(200) # MODIFIED TO 200
+            top_words = word_counts.most_common(200)
             return pd.DataFrame(top_words, columns=["word", "count"])
 
         with col1:
             st.subheader("Positive Reviews")
             pos_df = df_valid[df_valid["sentiment"] == "positive"]
-            pos_words_df = get_top_words(pos_df)
-            fig_pos = px.bar(
-                pos_words_df,
-                x="word",
-                y="count",
-                title="Top 200 Repeating Words in Positive Sentiment Reviews"
-            )
-            st.plotly_chart(fig_pos, use_container_width=True)
+            pos_words_df = get_top_words(pos_df) [cite: 46]
+            st.dataframe(pos_words_df, use_container_width=True)
 
         with col2:
             st.subheader("Negative Reviews")
             neg_df = df_valid[df_valid["sentiment"] == "negative"]
-            neg_words_df = get_top_words(neg_df)
-            fig_neg = px.bar(
-                neg_words_df,
-                x="word",
-                y="count",
-                title="Top 200 Repeating Words in Negative Sentiment Reviews"
-            )
-            st.plotly_chart(fig_neg, use_container_width=True)
+            neg_words_df = get_top_words(neg_df) [cite: 48]
+            st.dataframe(neg_words_df, use_container_width=True)
 
         st.write("Excluded words:", ", ".join(default_stopwords))
         st.write(f"Skipped Reviews: {skipped_count}")
@@ -1089,7 +1076,7 @@ defaults = {
     "estimated_time_low": None,
     "estimated_time_high": None,
     "ready_to_scrape": False,
-    "scraping": False,
+    "scraping": False, [cite: 105]
     "scrape_done": False,
     "cancel_requested": False,
     "all_reviews": [],
@@ -1109,7 +1096,7 @@ defaults = {
     "analysis_done": False,
     "analysis_raw_df": None,
     "analysis_processed_parts": [],
-    "analysis_remaining_df": None,
+    "analysis_remaining_df": None, [cite: 106]
     "analysis_total_reviews": 0,
     "analysis_existing_processed": 0,
     "analysis_processed_count": 0,
@@ -1135,8 +1122,7 @@ with top_col2:
         clear_saved_checkpoints()
         restart_app_state()
 
-# --- MODIFICATION 3: ADD THIRD TAB "PROCESSED DATA" ---
-tab_find_app, tab_load_files, tab_processed_data = st.tabs(["Find an App", "Load Files", "Processed Data"])
+tab_find_app, tab_load_files, tab_processed_data = st.tabs(["Find an App", "Load Files", "Processed Data"]) [cite: 107]
 
 with tab_find_app:
     left_col, right_col = st.columns([1.4, 1])
@@ -1151,70 +1137,70 @@ with tab_find_app:
         btn1, btn2, btn3, btn4 = st.columns(4)
 
         with btn1:
-            if not st.session_state.scraping:
+            if not st.session_state.scraping: [cite: 108]
                 if st.button("Load App", disabled=st.session_state.loading_app, use_container_width=True):
                     load_app_details()
             else:
                 st.button("Load App", disabled=True, use_container_width=True)
 
         with btn2:
-            if (
+            if ( [cite: 109]
                 st.session_state.checked_app_id
                 and not st.session_state.scraping
                 and not st.session_state.scrape_done
             ):
                 if st.button("Scrape", use_container_width=True):
-                    reset_scrape_state()
+                    reset_scrape_state() [cite: 110]
                     st.session_state.ready_to_scrape = True
                     st.session_state.scraping = True
                     st.session_state.scrape_start = time.time()
                     st.rerun()
-            else:
+            else: [cite: 111]
                 st.button("Scrape", disabled=True, use_container_width=True)
 
         with btn3:
             if st.session_state.scrape_done and st.session_state.all_reviews:
                 if st.session_state.analysis_running and not st.session_state.analysis_paused:
                     if st.button("Pause", use_container_width=True):
-                        st.session_state.analysis_pause_requested = True
+                        st.session_state.analysis_pause_requested = True [cite: 112]
                         st.rerun()
 
                 elif st.session_state.download_checkpoint_ready:
                     if st.button("Resume", use_container_width=True):
-                        st.session_state.analysis_running = True
+                        st.session_state.analysis_running = True [cite: 113]
                         st.session_state.analysis_paused = False
                         st.session_state.analysis_pause_requested = False
                         st.session_state.download_checkpoint_ready = False
-                        st.rerun()
+                        st.rerun() [cite: 114]
 
                 else:
                     if st.button("Analyze", use_container_width=True):
                         raw_df = pd.DataFrame(st.session_state.all_reviews)
                         source_id = get_analysis_source_id(
-                            app_id=st.session_state.get("checked_app_id"),
+                            app_id=st.session_state.get("checked_app_id"), [cite: 115]
                             raw_filename=None
                         )
                         reset_analysis_state()
-                        start_analysis(raw_df, source_id=source_id)
+                        start_analysis(raw_df, source_id=source_id) [cite: 116]
                         st.rerun()
             else:
                 st.button("Analyze", disabled=True, use_container_width=True)
 
         with btn4:
             if st.session_state.scrape_done and st.session_state.all_reviews:
-                df_download = pd.DataFrame(st.session_state.all_reviews)
+                df_download = pd.DataFrame(st.session_state.all_reviews) [cite: 117]
                 csv_bytes = df_download.to_csv(index=False).encode("utf-8")
                 download_name = safe_name(st.session_state.checked_app_id or "reviews")
 
                 st.download_button(
                     label="Save",
-                    data=csv_bytes,
+                    data=csv_bytes, [cite: 118]
                     file_name=f"{download_name}_reviews.csv",
                     mime="text/csv",
                     use_container_width=True
                 )
             else:
-                st.button("Save", disabled=True, use_container_width=True)
+                st.button("Save", disabled=True, use_container_width=True) [cite: 119]
 
     with right_col:
         if st.session_state.checked_app_id:
@@ -1224,37 +1210,37 @@ with tab_find_app:
                 if st.session_state.checked_app_icon:
                     st.image(st.session_state.checked_app_icon, width=80)
 
-            with info_col2:
+            with info_col2: [cite: 120]
                 if st.session_state.scraping:
                     current_total = len(st.session_state.all_reviews)
                     estimated_total = max(st.session_state.corrected_total_reviews or 1, 1)
-                    progress_ratio = min(current_total / estimated_total, 1.0)
+                    progress_ratio = min(current_total / estimated_total, 1.0) [cite: 121]
 
                     st.caption(f"Scraped Reviews: {current_total:,}")
                     st.progress(progress_ratio)
 
                 elif st.session_state.ready_to_scrape and not st.session_state.scrape_done:
                     corrected_total = st.session_state.corrected_total_reviews or st.session_state.total_reviews_reported or 0
-                    st.caption(f"Estimated Total Reviews: {corrected_total:,}")
+                    st.caption(f"Estimated Total Reviews: {corrected_total:,}") [cite: 122]
 
                 elif st.session_state.scrape_done:
                     final_total = len(st.session_state.all_reviews)
                     st.caption(f"Scraped Reviews: {final_total:,}")
-                    st.markdown(
+                    st.markdown( [cite: 123]
                         """
                         <div style="
                             display: inline-block;
-                            padding: 4px 8px;
+                            padding: 4px 8px; [cite: 124]
                             background-color: #e8f5e9;
                             color: #2e7d32;
                             border-radius: 6px;
                             font-size: 12px;
-                            margin-top: 4px;
+                            margin-top: 4px; [cite: 125]
                         ">
                             Scraping complete
                         </div>
                         """,
-                        unsafe_allow_html=True
+                        unsafe_allow_html=True [cite: 126]
                     )
 
             if st.session_state.loading_app:
@@ -1266,7 +1252,7 @@ with tab_load_files:
     with upload_col:
         uploaded_raw_file = st.file_uploader(
             "Raw Data",
-            type=["csv"],
+            type=["csv"], [cite: 127]
             key="uploaded_raw_file"
         )
 
@@ -1278,40 +1264,42 @@ with tab_load_files:
         elif st.session_state.analysis_paused or st.session_state.download_checkpoint_ready:
             button_label = "Resume"
         else:
-            button_label = "Analyze"
+            button_label = "Analyze" [cite: 128]
 
         if st.button(button_label, key="load_files_action_button"):
             if button_label == "Analyze":
                 if uploaded_raw_file is None:
                     st.error("Please upload a raw data file first.")
                 else:
-                    raw_df = pd.read_csv(uploaded_raw_file)
+                    raw_df = pd.read_csv(uploaded_raw_file) [cite: 129]
                     source_id = get_analysis_source_id(
                         app_id=None,
                         raw_filename=uploaded_raw_file.name
-                    )
+                    ) [cite: 130]
                     reset_analysis_state()
                     start_analysis(raw_df, source_id=source_id)
                     st.rerun()
 
             elif button_label == "Pause":
-                st.session_state.analysis_pause_requested = True
+                st.session_state.analysis_pause_requested = True [cite: 131]
                 st.rerun()
 
             elif button_label == "Resume":
                 st.session_state.analysis_running = True
                 st.session_state.analysis_paused = False
                 st.session_state.analysis_pause_requested = False
-                st.session_state.download_checkpoint_ready = False
+                st.session_state.download_checkpoint_ready = False [cite: 132]
                 st.rerun()
 
-# --- MODIFICATION: LOGIC FOR THE NEW PROCESSED DATA TAB ---
 with tab_processed_data:
-    st.subheader("Processed Dataset")
-    if st.session_state.analysis_done or st.session_state.analysis_processed_parts:
-        all_processed = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True) if st.session_state.analysis_processed_parts else None
+    if st.session_state.analysis_done or st.session_state.analysis_raw_df is not None:
+        st.subheader("Processed Dataset")
         
-        if all_processed is not None and not all_processed.empty:
+        # COMBINE PROCESSED DATA
+        if st.session_state.analysis_processed_parts:
+            final_df = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True)
+            
+            # PREPARE COLUMNS FOR DISPLAY
             final_columns = [
                 "reviewId",
                 "reviewDate",
@@ -1325,30 +1313,21 @@ with tab_processed_data:
                 "reviewWordCount"
             ]
             
-            # Map "at" to "reviewDate" if necessary
-            if "at" in all_processed.columns and "reviewDate" not in all_processed.columns:
-                all_processed.rename(columns={"at": "reviewDate"}, inplace=True)
-            
-            available_columns = [col for col in final_columns if col in all_processed.columns]
-            final_df = all_processed[available_columns].copy()
+            available_columns = [col for col in final_columns if col in final_df.columns]
+            display_df = final_df[available_columns].copy()
 
-            if "reviewDate" in final_df.columns:
-                final_df["reviewDate"] = pd.to_datetime(final_df["reviewDate"], errors="coerce")
-                final_df = final_df.sort_values(by="reviewDate", ascending=False)
+            if "reviewDate" in display_df.columns:
+                display_df = display_df.sort_values(by="reviewDate", ascending=False) [cite: 103]
 
-            st.dataframe(final_df, use_container_width=True)
+            st.dataframe(display_df, use_container_width=True)
 
-            csv = final_df.to_csv(index=False).encode("utf-8")
+            csv = display_df.to_csv(index=False).encode("utf-8")
             st.download_button(
                 label="Download Processed Data",
                 data=csv,
                 file_name="processed_reviews.csv",
                 mime="text/csv"
-            )
-        else:
-            st.info("No processed data available. Please run an analysis first.")
-    else:
-        st.info("No analysis has been performed yet.")
+            ) [cite: 104]
 
 if st.session_state.scraping and not st.session_state.cancel_requested:
     current_item = get_current_plan_item()
@@ -1361,7 +1340,7 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
     try:
         batch, new_token = reviews(
             st.session_state.checked_app_id,
-            lang="en",
+            lang="en", [cite: 133]
             country=current_item["country"],
             sort=current_item["sort_value"],
             count=COUNT_PER_BATCH,
@@ -1372,7 +1351,7 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
         st.session_state.batch_index += 1
         st.session_state.current_query_rounds += 1
 
-        current_total = len(st.session_state.all_reviews)
+        current_total = len(st.session_state.all_reviews) [cite: 134]
         reported_total = st.session_state.total_reviews_reported or 0
         st.session_state.corrected_total_reviews = max(reported_total, current_total)
 
@@ -1384,7 +1363,7 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
         else:
             st.session_state.current_stagnant_rounds = 0
 
-        st.session_state.current_token = new_token
+        st.session_state.current_token = new_token [cite: 135]
 
         should_advance = (
             new_token is None
@@ -1394,7 +1373,7 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
 
         if should_advance:
             st.session_state.current_plan_index += 1
-            st.session_state.current_token = None
+            st.session_state.current_token = None [cite: 136]
             st.session_state.current_query_rounds = 0
             st.session_state.current_stagnant_rounds = 0
 
@@ -1409,7 +1388,7 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
 if st.session_state.scrape_done:
     final_total = len(st.session_state.all_reviews)
     st.session_state.corrected_total_reviews = max(
-        st.session_state.total_reviews_reported or 0,
+        st.session_state.total_reviews_reported or 0, [cite: 137]
         final_total
     )
 
@@ -1421,10 +1400,10 @@ if st.session_state.analysis_running or st.session_state.download_checkpoint_rea
     total_reviews = st.session_state.analysis_total_reviews
     skipped_count = st.session_state.analysis_skipped_count
 
-    st.subheader("Analysis Progress") # restored original name
+    st.subheader("Analysis Dashboard")
     progress_ratio = overall_done / total_reviews if total_reviews > 0 else 0
     st.progress(progress_ratio)
-    st.write(f"{overall_done} out of {total_reviews} processed. {skipped_count} skipped.")
+    st.write(f"{overall_done} out of {total_reviews} processed. {skipped_count} skipped.") [cite: 138]
 
     if st.session_state.download_checkpoint_ready:
         st.info("Processing paused. Click Resume to continue.")
@@ -1446,4 +1425,4 @@ if st.session_state.cancel_requested:
         st.session_state.total_reviews_reported or 0,
         partial_total
     )
-    st.warning(f"Scraping cancelled. Partial unique reviews extracted: {partial_total:,}")
+    st.warning(f"Scraping cancelled. Partial unique reviews extracted: {partial_total:,}") [cite: 139]
