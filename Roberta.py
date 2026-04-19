@@ -275,20 +275,13 @@ def get_current_plan_item():
 
 def add_new_reviews(batch):
     added = 0
-    hit_old_review = False
     for row in batch:
-        # PLACEMENT CHANGE: 2024 CUTOFF 
-        review_date = row.get("at")
-        if review_date and review_date.year < 2024:
-            hit_old_review = True
-            continue
-
         rid = row.get("reviewId")
         if rid and rid not in st.session_state.seen_review_ids:
             st.session_state.seen_review_ids.add(rid)
             st.session_state.all_reviews.append(row)
             added += 1
-    return added, hit_old_review
+    return added
 
 
 def map_roberta_label(label):
@@ -353,18 +346,6 @@ def prepare_analysis_df(raw_df):
     if "reviewDate" in df.columns:
         df = df.dropna(subset=["reviewDate"])
         df["month"] = df["reviewDate"].dt.to_period("M").astype(str)
-
-    # PLACEMENT CHANGE: TAM SCORING LOGIC [cite: 1, 101, 102]
-    tam_lexicon = {
-        "peou": ["lag", "crash", "bagal", "hirap", "ui", "navigate", "nag-crash", "seamless"],
-        "sys_ben": ["discount", "voucher", "tipid", "free shipping", "cashback", "sulit"],
-        "net_eff": ["dami", "marami", "trend", "sellers", "options"],
-        "out_qual": ["legit", "fake", "mali", "authentic", "refund", "return", "customer service"]
-    }
-
-    for category, keywords in tam_lexicon.items():
-        pattern = '|'.join([r'\b{}\b'.format(k) for k in keywords])
-        df[f'tam_{category}'] = df['clean_text'].str.contains(pattern, case=False, na=False).astype(int)
 
     return df
 
@@ -490,7 +471,7 @@ def process_analysis_batch():
             row_dict["sentiment_score"] = signed_score
 
             batch_rows.append(row_dict)
-        st.session_state.analysis_processed_count += 1
+            st.session_state.analysis_processed_count += 1
 
     except Exception:
         for row_dict, review_text in zip(batch_df.to_dict("records"), batch_reviews):
@@ -642,7 +623,54 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                     use_container_width=True
                 )
 
-        # PLACEMENT CHANGE: MOVED TOP 30 WORDS TO BOTTOM [cite: 1, 43, 48]
+        st.subheader("Top 30 Words by Sentiment")
+
+        col1, col2 = st.columns(2)
+
+        default_stopwords = [
+            "the", "and", "is", "to", "of", "in", "for", "on", "with", "this",
+            "that", "it", "my", "app", "very", "so", "but", "are", "was", "be",
+            "have", "has", "had", "not", "at", "you", "we", "they", "i", "ang",
+            "nag", "your", "nyo"
+        ]
+
+        stopwords = set(default_stopwords)
+
+        def get_top_words(dataframe):
+            text = " ".join(dataframe["content"].dropna().astype(str))
+            words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
+            filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
+            word_counts = Counter(filtered_words)
+            top_words = word_counts.most_common(30)
+            return pd.DataFrame(top_words, columns=["word", "count"])
+
+        with col1:
+            st.subheader("Positive Reviews")
+            pos_df = df_valid[df_valid["sentiment"] == "positive"]
+            pos_words_df = get_top_words(pos_df)
+
+            fig_pos = px.bar(
+                pos_words_df,
+                x="word",
+                y="count",
+                title="Top 30 Repeating Words in Positive Sentiment Reviews"
+            )
+            st.plotly_chart(fig_pos, use_container_width=True)
+
+        with col2:
+            st.subheader("Negative Reviews")
+            neg_df = df_valid[df_valid["sentiment"] == "negative"]
+            neg_words_df = get_top_words(neg_df)
+
+            fig_neg = px.bar(
+                neg_words_df,
+                x="word",
+                y="count",
+                title="Top 30 Repeating Words in Negative Sentiment Reviews"
+            )
+            st.plotly_chart(fig_neg, use_container_width=True)
+
+        st.write("Excluded words:", ", ".join(default_stopwords))
 
         st.subheader("Sentiment")
 
@@ -1032,122 +1060,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough data for regression analysis.")
 
-        # PLACEMENT CHANGE: 5. TAM THEORETICAL ANALYSIS [cite: 1, 101, 102]
-        st.markdown("### 5. TAM (Technology Acceptance Model) Analysis")
-        
-        tam_options = {
-            "Perceived Ease of Use": "tam_peou",
-            "System Benefits": "tam_sys_ben",
-            "Network Effects": "tam_net_eff",
-            "Output Quality": "tam_out_qual"
-        }
-        
-        selected_tam_name = st.selectbox("Select TAM Construct to Analyze:", list(tam_options.keys()))
-        selected_tam_col = tam_options[selected_tam_name]
-
-        # Filter the dataset to ONLY include rows where the TAM feature is present (== 1)
-        tam_subset = stats_df[stats_df[selected_tam_col] == 1]
-
-        if not tam_subset.empty:
-            st.write(f"**Found {len(tam_subset)} reviews mentioning {selected_tam_name}.**")
-
-            # Count the sentiments for this specific TAM feature
-            tam_sent_counts = tam_subset["sentiment"].value_counts().reset_index()
-            tam_sent_counts.columns = ["sentiment", "count"]
-
-            # Create a bar chart
-            fig_tam = px.bar(
-                tam_sent_counts,
-                x="sentiment",
-                y="count",
-                title=f"Sentiment Distribution for {selected_tam_name}",
-                text="count",
-                color="sentiment",
-                color_discrete_map={"positive": "#2e7d32", "neutral": "#fbc02d", "negative": "#c62828"}
-            )
-            fig_tam.update_traces(textposition="outside")
-            st.plotly_chart(fig_tam, use_container_width=True)
-        else:
-            st.info(f"No reviews found containing keywords for {selected_tam_name}.")
-
-        # PLACEMENT CHANGE: MOVED TOP 30 WORDS HERE [cite: 43, 48]
-        st.subheader("Top 30 Words by Sentiment")
-
-        col1, col2 = st.columns(2)
-
-        default_stopwords = [
-            "the", "and", "is", "to", "of", "in", "for", "on", "with", "this",
-            "that", "it", "my", "app", "very", "so", "but", "are", "was", "be",
-            "have", "has", "had", "not", "at", "you", "we", "they", "i", "ang",
-            "nag", "your", "nyo"
-        ]
-
-        stopwords = set(default_stopwords)
-
-        from sklearn.feature_extraction.text import CountVectorizer
-
-        def get_top_words(dataframe, n_gram_range=(1, 2), top_n=30):
-            text_data = dataframe["clean_text"].dropna().astype(str).tolist()
-            if not text_data:
-                return pd.DataFrame(columns=["word", "count"])
-            
-            vectorizer = CountVectorizer(stop_words=list(stopwords), ngram_range=n_gram_range)
-            try:
-                X = vectorizer.fit_transform(text_data)
-                word_counts = X.sum(axis=0).A1
-                words = vectorizer.get_feature_names_out()
-                
-                freq_df = pd.DataFrame({'word': words, 'count': word_counts})
-                return freq_df.sort_values(by='count', ascending=False).head(top_n)
-            except ValueError:
-                return pd.DataFrame(columns=["word", "count"])
-
-        with col1:
-            st.subheader("Positive Reviews")
-            pos_words_df = get_top_words(df_valid[df_valid["sentiment"] == "positive"])
-
-            fig_pos = px.bar(
-                pos_words_df,
-                x="word",
-                y="count",
-                title="Top 30 Repeating Words in Positive Sentiment Reviews"
-            )
-            st.plotly_chart(fig_pos, use_container_width=True)
-
-        with col2:
-            st.subheader("Negative Reviews")
-            neg_words_df = get_top_words(df_valid[df_valid["sentiment"] == "negative"])
-
-            fig_neg = px.bar(
-                neg_words_df,
-                x="word",
-                y="count",
-                title="Top 30 Repeating Words in Negative Sentiment Reviews"
-            )
-            st.plotly_chart(fig_neg, use_container_width=True)
-
-        # PLACEMENT CHANGE: TAM LEXICON BUILDER [cite: 101, 102]
-        st.subheader("TAM Lexicon Builder (Top 200 Bigrams Export)")
-        with st.expander("Export Bigrams to Excel/CSV for TAM Mapping"):
-            st.write("Use this list to identify highly relevant e-commerce phrases.")
-            
-            pos_200_df = get_top_words(df_valid[df_valid["sentiment"] == "positive"], n_gram_range=(1, 2), top_n=200)
-            neg_200_df = get_top_words(df_valid[df_valid["sentiment"] == "negative"], n_gram_range=(1, 2), top_n=200)
-            
-            pos_200_df['sentiment'] = 'positive'
-            neg_200_df['sentiment'] = 'negative'
-            combined_bigrams = pd.concat([pos_200_df, neg_200_df])
-            
-            csv_bigrams = combined_bigrams.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="Download Top 200 Words & Bigrams",
-                data=csv_bigrams,
-                file_name="tam_lexicon_candidates.csv",
-                mime="text/csv"
-            )
-
-        st.write("Excluded words:", ", ".join(default_stopwords))
-
         st.write(f"Skipped Reviews: {skipped_count}")
 
         st.subheader("Processed Dataset")
@@ -1162,11 +1074,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             "sentiment_score",
             "sentiment",
             "actual_label",
-            "reviewWordCount",
-            "tam_peou",
-            "tam_sys_ben",
-            "tam_net_eff",
-            "tam_out_qual"
+            "reviewWordCount"
         ]
 
         final_columns = [col for col in final_columns if col in df_valid.columns]
@@ -1439,7 +1347,7 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
             continuation_token=st.session_state.current_token
         )
 
-        added_count, hit_old_review = add_new_reviews(batch)
+        added_count = add_new_reviews(batch)
         st.session_state.batch_index += 1
         st.session_state.current_query_rounds += 1
 
@@ -1459,7 +1367,6 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
 
         should_advance = (
             new_token is None
-            or hit_old_review  # PLACEMENT CHANGE: 2024 CUTOFF 
             or st.session_state.current_stagnant_rounds >= 2
             or st.session_state.current_query_rounds >= SCRAPE_MAX_ROUNDS_PER_QUERY
         )
