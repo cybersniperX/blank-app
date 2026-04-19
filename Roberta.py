@@ -277,7 +277,14 @@ def add_new_reviews(batch):
     added = 0
     for row in batch:
         rid = row.get("reviewId")
-        if rid and rid not in st.session_state.seen_review_ids:
+        # --- MODIFICATION 1: EXCLUDE REVIEWS OLDER THAN 2024 ---
+        review_at = row.get("at")
+        is_post_2024 = True
+        if review_at and hasattr(review_at, 'year'):
+            if review_at.year < 2024:
+                is_post_2024 = False
+        
+        if rid and rid not in st.session_state.seen_review_ids and is_post_2024:
             st.session_state.seen_review_ids.add(rid)
             st.session_state.all_reviews.append(row)
             added += 1
@@ -471,7 +478,7 @@ def process_analysis_batch():
             row_dict["sentiment_score"] = signed_score
 
             batch_rows.append(row_dict)
-            st.session_state.analysis_processed_count += 1
+        st.session_state.analysis_processed_count += 1
 
     except Exception:
         for row_dict, review_text in zip(batch_df.to_dict("records"), batch_reviews):
@@ -500,7 +507,7 @@ def process_analysis_batch():
                 st.session_state.analysis_skipped_count += 1
 
             batch_rows.append(row_dict)
-            st.session_state.analysis_processed_count += 1
+        st.session_state.analysis_processed_count += 1
 
     st.session_state.analysis_processed_parts.append(pd.DataFrame(batch_rows))
     st.session_state.analysis_remaining_df = next_remaining_df
@@ -623,54 +630,8 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                     use_container_width=True
                 )
 
-        st.subheader("Top 30 Words by Sentiment")
-
-        col1, col2 = st.columns(2)
-
-        default_stopwords = [
-            "the", "and", "is", "to", "of", "in", "for", "on", "with", "this",
-            "that", "it", "my", "app", "very", "so", "but", "are", "was", "be",
-            "have", "has", "had", "not", "at", "you", "we", "they", "i", "ang",
-            "nag", "your", "nyo"
-        ]
-
-        stopwords = set(default_stopwords)
-
-        def get_top_words(dataframe):
-            text = " ".join(dataframe["content"].dropna().astype(str))
-            words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
-            filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
-            word_counts = Counter(filtered_words)
-            top_words = word_counts.most_common(30)
-            return pd.DataFrame(top_words, columns=["word", "count"])
-
-        with col1:
-            st.subheader("Positive Reviews")
-            pos_df = df_valid[df_valid["sentiment"] == "positive"]
-            pos_words_df = get_top_words(pos_df)
-
-            fig_pos = px.bar(
-                pos_words_df,
-                x="word",
-                y="count",
-                title="Top 30 Repeating Words in Positive Sentiment Reviews"
-            )
-            st.plotly_chart(fig_pos, use_container_width=True)
-
-        with col2:
-            st.subheader("Negative Reviews")
-            neg_df = df_valid[df_valid["sentiment"] == "negative"]
-            neg_words_df = get_top_words(neg_df)
-
-            fig_neg = px.bar(
-                neg_words_df,
-                x="word",
-                y="count",
-                title="Top 30 Repeating Words in Negative Sentiment Reviews"
-            )
-            st.plotly_chart(fig_neg, use_container_width=True)
-
-        st.write("Excluded words:", ", ".join(default_stopwords))
+        # Removed Word charts from original position
+        # st.subheader("Top 30 Words by Sentiment") - MODIFIED
 
         st.subheader("Sentiment")
 
@@ -1060,38 +1021,52 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough data for regression analysis.")
 
-        st.write(f"Skipped Reviews: {skipped_count}")
+        # --- MODIFICATION 2: TOP 200 WORDS AT THE BOTTOM ---
+        st.subheader("Top 200 Words by Sentiment")
+        col1, col2 = st.columns(2)
 
-        st.subheader("Processed Dataset")
-
-        final_columns = [
-            "reviewId",
-            "reviewDate",
-            "content",
-            "score",
-            "roberta_label",
-            "roberta_score",
-            "sentiment_score",
-            "sentiment",
-            "actual_label",
-            "reviewWordCount"
+        default_stopwords = [
+            "the", "and", "is", "to", "of", "in", "for", "on", "with", "this",
+            "that", "it", "my", "app", "very", "so", "but", "are", "was", "be",
+            "have", "has", "had", "not", "at", "you", "we", "they", "i", "ang",
+            "nag", "your", "nyo"
         ]
+        stopwords = set(default_stopwords)
 
-        final_columns = [col for col in final_columns if col in df_valid.columns]
-        final_df = df_valid[final_columns].copy()
+        def get_top_words(dataframe):
+            text = " ".join(dataframe["content"].dropna().astype(str))
+            words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
+            filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
+            word_counts = Counter(filtered_words)
+            top_words = word_counts.most_common(200) # MODIFIED TO 200
+            return pd.DataFrame(top_words, columns=["word", "count"])
 
-        if "reviewDate" in final_df.columns:
-            final_df = final_df.sort_values(by="reviewDate", ascending=False)
+        with col1:
+            st.subheader("Positive Reviews")
+            pos_df = df_valid[df_valid["sentiment"] == "positive"]
+            pos_words_df = get_top_words(pos_df)
+            fig_pos = px.bar(
+                pos_words_df,
+                x="word",
+                y="count",
+                title="Top 200 Repeating Words in Positive Sentiment Reviews"
+            )
+            st.plotly_chart(fig_pos, use_container_width=True)
 
-        st.dataframe(final_df, use_container_width=True)
+        with col2:
+            st.subheader("Negative Reviews")
+            neg_df = df_valid[df_valid["sentiment"] == "negative"]
+            neg_words_df = get_top_words(neg_df)
+            fig_neg = px.bar(
+                neg_words_df,
+                x="word",
+                y="count",
+                title="Top 200 Repeating Words in Negative Sentiment Reviews"
+            )
+            st.plotly_chart(fig_neg, use_container_width=True)
 
-        csv = final_df.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="Download Processed Data",
-            data=csv,
-            file_name="processed_reviews.csv",
-            mime="text/csv"
-        )
+        st.write("Excluded words:", ", ".join(default_stopwords))
+        st.write(f"Skipped Reviews: {skipped_count}")
 
         if st.session_state.get("analysis_source_id"):
             delete_latest_checkpoint(st.session_state.analysis_source_id)
@@ -1160,7 +1135,8 @@ with top_col2:
         clear_saved_checkpoints()
         restart_app_state()
 
-tab_find_app, tab_load_files = st.tabs(["Find an App", "Load Files"])
+# --- MODIFICATION 3: ADD THIRD TAB "PROCESSED DATA" ---
+tab_find_app, tab_load_files, tab_processed_data = st.tabs(["Find an App", "Load Files", "Processed Data"])
 
 with tab_find_app:
     left_col, right_col = st.columns([1.4, 1])
@@ -1329,6 +1305,51 @@ with tab_load_files:
                 st.session_state.download_checkpoint_ready = False
                 st.rerun()
 
+# --- MODIFICATION: LOGIC FOR THE NEW PROCESSED DATA TAB ---
+with tab_processed_data:
+    st.subheader("Processed Dataset")
+    if st.session_state.analysis_done or st.session_state.analysis_processed_parts:
+        all_processed = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True) if st.session_state.analysis_processed_parts else None
+        
+        if all_processed is not None and not all_processed.empty:
+            final_columns = [
+                "reviewId",
+                "reviewDate",
+                "content",
+                "score",
+                "roberta_label",
+                "roberta_score",
+                "sentiment_score",
+                "sentiment",
+                "actual_label",
+                "reviewWordCount"
+            ]
+            
+            # Map "at" to "reviewDate" if necessary
+            if "at" in all_processed.columns and "reviewDate" not in all_processed.columns:
+                all_processed.rename(columns={"at": "reviewDate"}, inplace=True)
+            
+            available_columns = [col for col in final_columns if col in all_processed.columns]
+            final_df = all_processed[available_columns].copy()
+
+            if "reviewDate" in final_df.columns:
+                final_df["reviewDate"] = pd.to_datetime(final_df["reviewDate"], errors="coerce")
+                final_df = final_df.sort_values(by="reviewDate", ascending=False)
+
+            st.dataframe(final_df, use_container_width=True)
+
+            csv = final_df.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="Download Processed Data",
+                data=csv,
+                file_name="processed_reviews.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("No processed data available. Please run an analysis first.")
+    else:
+        st.info("No analysis has been performed yet.")
+
 if st.session_state.scraping and not st.session_state.cancel_requested:
     current_item = get_current_plan_item()
 
@@ -1400,7 +1421,7 @@ if st.session_state.analysis_running or st.session_state.download_checkpoint_rea
     total_reviews = st.session_state.analysis_total_reviews
     skipped_count = st.session_state.analysis_skipped_count
 
-    st.subheader("Analysis Dashboard")
+    st.subheader("Analysis Progress") # restored original name
     progress_ratio = overall_done / total_reviews if total_reviews > 0 else 0
     st.progress(progress_ratio)
     st.write(f"{overall_done} out of {total_reviews} processed. {skipped_count} skipped.")
