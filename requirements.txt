@@ -9,3 +9,4 @@ protobuf
 openpyxl
 scipy
 statsmodels
+scikit-learn
