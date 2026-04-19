@@ -46,7 +46,7 @@ COUNTRY_OPTIONS = ["ph"]
 
 COUNT_PER_BATCH = 200
 SCRAPE_MAX_ROUNDS_PER_QUERY = 3000
-ROBERTA_BATCH_SIZE = 10
+ROBERTA_BATCH_SIZE = 100 # Increased for faster processing
 ROBERTA_MAX_LENGTH = 128
 CHECKPOINT_INTERVAL = 50000
 CHECKPOINT_DIR = "checkpoints"
@@ -478,7 +478,7 @@ def process_analysis_batch():
             row_dict["sentiment_score"] = signed_score
 
             batch_rows.append(row_dict)
-        st.session_state.analysis_processed_count += 1
+        st.session_state.analysis_processed_count += len(batch_df)
 
     except Exception:
         for row_dict, review_text in zip(batch_df.to_dict("records"), batch_reviews):
@@ -507,7 +507,7 @@ def process_analysis_batch():
                 st.session_state.analysis_skipped_count += 1
 
             batch_rows.append(row_dict)
-        st.session_state.analysis_processed_count += 1
+        st.session_state.analysis_processed_count += len(batch_df)
 
     st.session_state.analysis_processed_parts.append(pd.DataFrame(batch_rows))
     st.session_state.analysis_remaining_df = next_remaining_df
@@ -542,7 +542,6 @@ def process_analysis_batch():
 
 
 def show_analysis_results(df_valid, checkpoint_df=None):
-    # TITLE ONLY SHOWS IF NOT ANALYZING
     st.title("Analysis Dashboard")
 
     try:
@@ -1053,6 +1052,21 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             st.dataframe(neg_words_df, use_container_width=True)
 
         st.write("Excluded words:", ", ".join(default_stopwords))
+        
+        # PROCESSED DATASET TABLE MOVED HERE
+        st.subheader("Processed Dataset")
+        final_columns = [
+            "reviewId", "reviewDate", "content", "score", "roberta_label",
+            "roberta_score", "sentiment_score", "sentiment", "actual_label", "reviewWordCount"
+        ]
+        available_columns = [col for col in final_columns if col in df_valid.columns]
+        display_df = df_valid[available_columns].copy()
+        if "reviewDate" in display_df.columns:
+            display_df = display_df.sort_values(by="reviewDate", ascending=False)
+        st.dataframe(display_df, use_container_width=True)
+        csv = display_df.to_csv(index=False).encode("utf-8")
+        st.download_button(label="Download Processed Data", data=csv, file_name="processed_reviews.csv", mime="text/csv")
+        
         st.write(f"Skipped Reviews: {skipped_count}")
 
         if st.session_state.get("analysis_source_id"):
@@ -1122,7 +1136,8 @@ with top_col2:
         clear_saved_checkpoints()
         restart_app_state()
 
-tab_find_app, tab_load_files, tab_processed_data = st.tabs(["Find an App", "Load Files", "Processed Data"])
+# Processed Data Tab removed from here
+tab_find_app, tab_load_files = st.tabs(["Find an App", "Load Files"])
 
 with tab_find_app:
     left_col, right_col = st.columns([1.4, 1])
@@ -1291,27 +1306,6 @@ with tab_load_files:
                 st.session_state.download_checkpoint_ready = False
                 st.rerun()
 
-with tab_processed_data:
-    # PROCESSED DATA ONLY SHOWS THE TABLE
-    if st.session_state.analysis_done or st.session_state.analysis_processed_parts:
-        st.subheader("Processed Dataset")
-        final_df = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True) if st.session_state.analysis_processed_parts else None
-        
-        if final_df is not None and not final_df.empty:
-            final_columns = [
-                "reviewId", "reviewDate", "content", "score", "roberta_label",
-                "roberta_score", "sentiment_score", "sentiment", "actual_label", "reviewWordCount"
-            ]
-            available_columns = [col for col in final_columns if col in final_df.columns]
-            final_df = final_df[available_columns].copy()
-            if "reviewDate" in final_df.columns:
-                final_df["reviewDate"] = pd.to_datetime(final_df["reviewDate"], errors="coerce")
-                final_df = final_df.sort_values(by="reviewDate", ascending=False)
-
-            st.dataframe(final_df, use_container_width=True)
-            csv = final_df.to_csv(index=False).encode("utf-8")
-            st.download_button(label="Download Processed Data", data=csv, file_name="processed_reviews.csv", mime="text/csv")
-
 if st.session_state.scraping and not st.session_state.cancel_requested:
     current_item = get_current_plan_item()
     if current_item is None:
@@ -1337,18 +1331,18 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
             st.session_state.current_token = None
             st.session_state.current_query_rounds = 0
             st.session_state.current_stagnant_rounds = 0
-        time.sleep(0.05); st.rerun()
+        st.rerun() # Removed time.sleep
     except Exception as e:
         st.error(f"Scraping error: {e}"); st.session_state.scraping = False
 
 if st.session_state.analysis_running or st.session_state.download_checkpoint_ready:
     overall_done = st.session_state.analysis_existing_processed + st.session_state.analysis_processed_count
     total_reviews = st.session_state.analysis_total_reviews
-    st.subheader("Analysis Progress") # ONLY SHOW PROGRESS BAR
+    st.subheader("Analysis Progress")
     st.progress(overall_done / total_reviews if total_reviews > 0 else 0)
     st.write(f"{overall_done} out of {total_reviews} processed. {st.session_state.analysis_skipped_count} skipped.")
     if st.session_state.analysis_running and not st.session_state.analysis_paused:
-        process_analysis_batch(); time.sleep(0.05); st.rerun()
+        process_analysis_batch(); st.rerun() # Removed time.sleep
 
 if st.session_state.analysis_done:
     df_final = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True)
