@@ -8,3 +8,4 @@ sentencepiece
 protobuf
 openpyxl
 scipy
+statsmodels

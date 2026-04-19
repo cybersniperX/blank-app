@@ -878,7 +878,11 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         # =========================
         # INFERENTIAL STATISTICS
         # =========================
-        from scipy.stats import spearmanr, chi2_contingency, kruskal, linregress
+        # =========================
+        # INFERENTIAL STATISTICS
+        # NO SCIPY VERSION
+        # =========================
+        import numpy as np
 
         st.subheader("Inferential Statistical Analysis")
 
@@ -910,22 +914,103 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
             stats_df["rating_class"] = stats_df["score"].apply(classify_rating)
 
+            # =========================
+            # HELPER FUNCTIONS
+            # =========================
+            def compute_spearman(x, y):
+                x_rank = pd.Series(x).rank()
+                y_rank = pd.Series(y).rank()
+                return x_rank.corr(y_rank)
+
+            def compute_chi_square(table):
+                observed = table.values
+                row_totals = observed.sum(axis=1, keepdims=True)
+                col_totals = observed.sum(axis=0, keepdims=True)
+                grand_total = observed.sum()
+
+                expected = (row_totals @ col_totals) / grand_total
+                chi_square = ((observed - expected) ** 2 / expected).sum()
+                dof = (observed.shape[0] - 1) * (observed.shape[1] - 1)
+
+                expected_df = pd.DataFrame(
+                    expected,
+                    index=table.index,
+                    columns=table.columns
+                )
+
+                return chi_square, dof, expected_df
+
+            def compute_kruskal_wallis(groups):
+                all_values = []
+                group_labels = []
+
+                for i, group in enumerate(groups):
+                    for val in group:
+                        all_values.append(val)
+                        group_labels.append(i)
+
+                all_values = pd.Series(all_values)
+                ranks = all_values.rank()
+
+                n_total = len(all_values)
+                h_sum = 0
+
+                for i, group in enumerate(groups):
+                    group_ranks = ranks[[j for j, g in enumerate(group_labels) if g == i]]
+                    n_i = len(group_ranks)
+                    if n_i > 0:
+                        h_sum += (group_ranks.sum() ** 2) / n_i
+
+                h_stat = (12 / (n_total * (n_total + 1))) * h_sum - 3 * (n_total + 1)
+                return h_stat
+
+            def compute_regression(x, y):
+                x = np.array(x, dtype=float)
+                y = np.array(y, dtype=float)
+
+                slope, intercept = np.polyfit(x, y, 1)
+                y_pred = slope * x + intercept
+
+                r = np.corrcoef(x, y)[0, 1]
+                r_squared = r ** 2
+
+                return slope, intercept, r, r_squared, y_pred
+
+            # =========================
+            # ROW 1
+            # =========================
             col1, col2 = st.columns(2)
 
+            # 1. Correlation Analysis
             with col1:
                 st.markdown("### 1. Correlation Analysis")
 
                 corr_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
 
                 if len(corr_df) >= 2:
-                    corr_value, corr_p = spearmanr(corr_df["sentiment_score"], corr_df["score"])
+                    corr_value = compute_spearman(
+                        corr_df["sentiment_score"],
+                        corr_df["score"]
+                    )
+
+                    def interpret_corr(val):
+                        abs_val = abs(val)
+                        if abs_val >= 0.80:
+                            return "Very Strong"
+                        elif abs_val >= 0.60:
+                            return "Strong"
+                        elif abs_val >= 0.40:
+                            return "Moderate"
+                        elif abs_val >= 0.20:
+                            return "Weak"
+                        else:
+                            return "Very Weak"
 
                     corr_result = pd.DataFrame({
-                        "Metric": ["Spearman Correlation", "p-value", "Interpretation"],
+                        "Metric": ["Spearman Correlation", "Strength"],
                         "Value": [
                             round(corr_value, 4),
-                            round(corr_p, 6),
-                            "Significant" if corr_p < 0.05 else "Not Significant"
+                            interpret_corr(corr_value)
                         ]
                     })
 
@@ -942,21 +1027,20 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough data for correlation analysis.")
 
+            # 2. Chi-square Test
             with col2:
                 st.markdown("### 2. Chi-square Test")
 
                 chi_table = pd.crosstab(stats_df["sentiment"], stats_df["rating_class"])
 
                 if chi_table.shape[0] >= 2 and chi_table.shape[1] >= 2:
-                    chi2, p, dof, expected = chi2_contingency(chi_table)
+                    chi2, dof, expected_df = compute_chi_square(chi_table)
 
                     chi_result = pd.DataFrame({
-                        "Metric": ["Chi-square", "p-value", "Degrees of Freedom", "Interpretation"],
+                        "Metric": ["Chi-square", "Degrees of Freedom"],
                         "Value": [
                             round(chi2, 4),
-                            round(p, 6),
-                            dof,
-                            "Significant Association" if p < 0.05 else "No Significant Association"
+                            dof
                         ]
                     })
 
@@ -973,12 +1057,17 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough category variation for chi-square test.")
 
+            # =========================
+            # ROW 2
+            # =========================
             col3, col4 = st.columns(2)
 
+            # 3. Kruskal-Wallis Test
             with col3:
                 st.markdown("### 3. Kruskal-Wallis Test by Month")
 
                 month_groups = []
+
                 monthly_grouped = stats_df.groupby("month")["sentiment_score"]
 
                 for month_name, values in monthly_grouped:
@@ -987,15 +1076,11 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                         month_groups.append(clean_vals)
 
                 if len(month_groups) >= 2:
-                    kw_stat, kw_p = kruskal(*month_groups)
+                    kw_stat = compute_kruskal_wallis(month_groups)
 
                     kw_result = pd.DataFrame({
-                        "Metric": ["Kruskal-Wallis Statistic", "p-value", "Interpretation"],
-                        "Value": [
-                            round(kw_stat, 4),
-                            round(kw_p, 6),
-                            "Significant Difference Across Months" if kw_p < 0.05 else "No Significant Difference Across Months"
-                        ]
+                        "Metric": ["Kruskal-Wallis Statistic"],
+                        "Value": [round(kw_stat, 4)]
                     })
 
                     st.dataframe(kw_result, use_container_width=True)
@@ -1017,29 +1102,25 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough monthly groups for Kruskal-Wallis test.")
 
+            # 4. Regression Analysis
             with col4:
                 st.markdown("### 4. Regression Analysis")
 
                 reg_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
 
                 if len(reg_df) >= 2:
-                    slope, intercept, r_value, p_value, std_err = linregress(
+                    slope, intercept, r_value, r_squared, y_pred = compute_regression(
                         reg_df["sentiment_score"],
                         reg_df["score"]
                     )
 
-                    r_squared = r_value ** 2
-
                     reg_result = pd.DataFrame({
-                        "Metric": ["Slope", "Intercept", "R", "R-squared", "p-value", "Std. Error", "Interpretation"],
+                        "Metric": ["Slope", "Intercept", "R", "R-squared"],
                         "Value": [
                             round(slope, 4),
                             round(intercept, 4),
                             round(r_value, 4),
-                            round(r_squared, 4),
-                            round(p_value, 6),
-                            round(std_err, 6),
-                            "Significant Predictor" if p_value < 0.05 else "Not a Significant Predictor"
+                            round(r_squared, 4)
                         ]
                     })
 
@@ -1059,7 +1140,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                     )
                 else:
                     st.warning("Not enough data for regression analysis.")
-
+                    
         st.write(f"Skipped Reviews: {skipped_count}")
 
         st.subheader("Processed Dataset")
