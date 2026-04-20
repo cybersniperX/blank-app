@@ -277,7 +277,6 @@ def add_new_reviews(batch):
     added = 0
     for row in batch:
         rid = row.get("reviewId")
-        # We no longer filter by year here so the scraper keeps running
         if rid and rid not in st.session_state.seen_review_ids:
             st.session_state.seen_review_ids.add(rid)
             st.session_state.all_reviews.append(row)
@@ -1294,11 +1293,21 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
         st.session_state.batch_index += 1
         st.session_state.current_query_rounds += 1
         st.session_state.current_token = new_token
-        if len(batch) == 0 or added_count == 0 or new_token == st.session_state.current_token:
+
+        # Only count as stagnant if the batch was truly empty or the token looped back.
+        # added_count == 0 alone (all duplicates) is normal during pagination overlap
+        # and should NOT trigger stagnation — only reset it.
+        truly_done = len(batch) == 0
+        token_looped = (new_token is not None and new_token == st.session_state.current_token)
+
+        if truly_done or token_looped:
             st.session_state.current_stagnant_rounds += 1
-        else:
+        elif added_count > 0:
             st.session_state.current_stagnant_rounds = 0
-        if new_token is None or st.session_state.current_stagnant_rounds >= 2 or st.session_state.current_query_rounds >= SCRAPE_MAX_ROUNDS_PER_QUERY:
+        # If added_count == 0 but batch is non-empty, it is a duplicate-heavy overlap —
+        # do not increment or reset; just let it pass through.
+
+        if new_token is None or st.session_state.current_stagnant_rounds >= 10 or st.session_state.current_query_rounds >= SCRAPE_MAX_ROUNDS_PER_QUERY:
             st.session_state.current_plan_index += 1
             st.session_state.current_token = None
             st.session_state.current_query_rounds = 0
