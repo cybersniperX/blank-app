@@ -338,7 +338,7 @@ def prepare_analysis_df(raw_df):
         st.error("The uploaded raw file does not contain a 'score' column.")
         st.stop()
 
-    df["score"] = pd.to_numeric(df["score"], errors="coerce") # FIX: Convert string to numeric [cite: 21]
+    df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
     df = df[df["content"].notna()]
     df = df[df["content"].astype(str).str.strip() != ""]
@@ -546,8 +546,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
     try:
         df_valid = df_valid.copy()
-        
-        # FIX: Explicit numeric conversion before calculation 
         df_valid["score"] = pd.to_numeric(df_valid["score"], errors="coerce")
         df_valid["sentiment_score"] = pd.to_numeric(df_valid.get("sentiment_score", 0), errors="coerce")
         
@@ -670,49 +668,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             st.plotly_chart(fig_pie, use_container_width=True)
         with col3:
             st.plotly_chart(fig_heatmap, use_container_width=True)
-
-        st.subheader("Classified Summary")
-
-        actual_summary = df_valid["actual_label"].value_counts().reset_index()
-        actual_summary.columns = ["actual_label", "total_count"]
-
-        fig_actual_bar = px.bar(
-            actual_summary,
-            x="actual_label",
-            y="total_count",
-            text="total_count",
-            title="Count of Classified Labels"
-        )
-        fig_actual_bar.update_traces(textposition="outside")
-
-        fig_actual_pie = px.pie(
-            actual_summary,
-            names="actual_label",
-            values="total_count",
-            title="Classified Label Distribution"
-        )
-
-        actual_heatmap = df_valid.groupby(["month", "actual_label"]).size().reset_index(name="count")
-        actual_pivot = actual_heatmap.pivot(
-            index="actual_label",
-            columns="month",
-            values="count"
-        ).fillna(0)
-
-        fig_actual_heatmap = px.imshow(
-            actual_pivot,
-            text_auto=True,
-            aspect="auto",
-            title="Monthly Classified Heatmap"
-        )
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.plotly_chart(fig_actual_bar, use_container_width=True)
-        with col2:
-            st.plotly_chart(fig_actual_pie, use_container_width=True)
-        with col3:
-            st.plotly_chart(fig_actual_heatmap, use_container_width=True)
 
         st.subheader("Review Score Over Time")
 
@@ -853,7 +808,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         if missing_cols:
             st.error(f"Missing required columns: {missing_cols}")
         else:
-            stats_df["score"] = pd.to_numeric(stats_df["score"], errors="coerce") # FIX: Convert string to numeric [cite: 65]
+            stats_df["score"] = pd.to_numeric(stats_df["score"], errors="coerce")
             stats_df["sentiment_score"] = pd.to_numeric(stats_df["sentiment_score"], errors="coerce")
             stats_df["reviewDate"] = pd.to_datetime(stats_df["reviewDate"], errors="coerce")
 
@@ -1058,7 +1013,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         st.write("Excluded words:", ", ".join(default_stopwords))
         
-        # PROCESSED DATASET TABLE
         st.subheader("Processed Dataset")
         final_columns = [
             "reviewId", "reviewDate", "content", "score", "roberta_label",
