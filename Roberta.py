@@ -55,6 +55,7 @@ CHECKPOINT_DIR = "checkpoints"
 # DATE CUTOFF FOR SCRAPING (2025 onwards)
 # ─────────────────────────────────────────────
 SCRAPE_YEAR_CUTOFF = 2025
+SCRAPE_MAX_REVIEWS = 1_000_000  # Hard cap at 1 million reviews
 
 
 def safe_name(text):
@@ -279,14 +280,19 @@ def get_current_plan_item():
 
 
 # ─────────────────────────────────────────────
-# UPDATED: add_new_reviews now filters by SCRAPE_YEAR_CUTOFF
-# and returns a hit_cutoff flag for early exit
+# UPDATED: add_new_reviews filters by SCRAPE_YEAR_CUTOFF and respects SCRAPE_MAX_REVIEWS cap.
+# hit_cutoff is only True when the ENTIRE batch has zero qualifying reviews,
+# meaning we've paginated fully past the cutoff date.
 # ─────────────────────────────────────────────
 def add_new_reviews(batch):
     added = 0
-    hit_cutoff = False
+    qualified_in_batch = 0  # how many reviews in this batch pass the date filter
 
     for row in batch:
+        # Stop collecting if we've hit the 1M cap
+        if len(st.session_state.all_reviews) >= SCRAPE_MAX_REVIEWS:
+            break
+
         rid = row.get("reviewId")
 
         # Date filter: skip reviews older than the cutoff year
@@ -295,17 +301,26 @@ def add_new_reviews(batch):
             try:
                 parsed_date = pd.to_datetime(review_date)
                 if parsed_date.year < SCRAPE_YEAR_CUTOFF:
-                    hit_cutoff = True
-                    continue
+                    continue  # skip old review but keep scanning the batch
             except Exception:
                 pass  # If date can't be parsed, allow the review through
+
+        # This review passes the date filter
+        qualified_in_batch += 1
 
         if rid and rid not in st.session_state.seen_review_ids:
             st.session_state.seen_review_ids.add(rid)
             st.session_state.all_reviews.append(row)
             added += 1
 
-    return added, hit_cutoff
+    # Only signal cutoff when the whole batch had zero qualifying reviews —
+    # meaning we've fully scrolled past the 2025+ window.
+    hit_cutoff = (len(batch) > 0 and qualified_in_batch == 0)
+
+    # Also signal done if we've hit the 1M cap
+    hit_cap = len(st.session_state.all_reviews) >= SCRAPE_MAX_REVIEWS
+
+    return added, hit_cutoff or hit_cap
 
 
 def map_roberta_label(label):
