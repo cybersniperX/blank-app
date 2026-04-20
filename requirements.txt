@@ -10,3 +10,4 @@ openpyxl
 scipy
 statsmodels
 scikit-learn
+supabase

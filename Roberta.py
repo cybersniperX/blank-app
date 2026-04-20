@@ -10,6 +10,7 @@ from collections import Counter
 from urllib.parse import urlparse, parse_qs
 from google_play_scraper import app, reviews, Sort
 from transformers import pipeline
+from supabase import create_client
 
 
 st.set_page_config(page_title="Google Play Scraper and Analysis Dashboard", layout="wide")
@@ -23,6 +24,129 @@ def load_roberta_model():
         model="cardiffnlp/twitter-xlm-roberta-base-sentiment",
         tokenizer="cardiffnlp/twitter-xlm-roberta-base-sentiment"
     )
+
+
+@st.cache_resource
+def get_supabase_client():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+
+def supabase_save_reviews(app_id, batch):
+    try:
+        sb = get_supabase_client()
+        rows = []
+        for r in batch:
+            rows.append({
+                "app_id":        app_id,
+                "review_id":     str(r.get("reviewId", "")),
+                "content":       r.get("content", ""),
+                "score":         r.get("score"),
+                "review_date":   str(r.get("at", "")) if r.get("at") else None,
+                "thumbs_up":     r.get("thumbsUpCount"),
+                "reply_content": r.get("replyContent"),
+                "replied_at":    str(r.get("repliedAt", "")) if r.get("repliedAt") else None,
+                "sort_order":    "newest",
+                "country":       "ph",
+            })
+        chunk_size = 500
+        for i in range(0, len(rows), chunk_size):
+            sb.table("scrape_checkpoints").upsert(rows[i:i + chunk_size]).execute()
+    except Exception as e:
+        st.warning(f"Review save failed: {e}")
+
+
+def supabase_save_token(app_id, token, total_scraped):
+    try:
+        sb = get_supabase_client()
+        sb.table("scrape_tokens").upsert({
+            "app_id":             app_id,
+            "continuation_token": str(token) if token else None,
+            "total_scraped":      total_scraped,
+            "updated_at":         "now()"
+        }).execute()
+    except Exception as e:
+        st.warning(f"Token save failed: {e}")
+
+
+def supabase_load_token(app_id):
+    try:
+        sb = get_supabase_client()
+        result = sb.table("scrape_tokens").select("*").eq("app_id", app_id).execute()
+        if result.data:
+            return result.data[0]
+        return None
+    except Exception:
+        return None
+
+
+def supabase_load_reviews(app_id):
+    try:
+        sb = get_supabase_client()
+        all_rows = []
+        page_size = 1000
+        offset = 0
+        while True:
+            result = sb.table("scrape_checkpoints") \
+                .select("*") \
+                .eq("app_id", app_id) \
+                .range(offset, offset + page_size - 1) \
+                .execute()
+            if not result.data:
+                break
+            all_rows.extend(result.data)
+            if len(result.data) < page_size:
+                break
+            offset += page_size
+        return all_rows
+    except Exception:
+        return []
+
+
+def supabase_delete_app_data(app_id):
+    try:
+        sb = get_supabase_client()
+        sb.table("scrape_checkpoints").delete().eq("app_id", app_id).execute()
+        sb.table("scrape_tokens").delete().eq("app_id", app_id).execute()
+    except Exception as e:
+        st.warning(f"Delete failed: {e}")
+
+
+def load_from_supabase_if_available(app_id):
+    token_row = supabase_load_token(app_id)
+    if not token_row:
+        return False
+
+    total_scraped = token_row.get("total_scraped", 0)
+    if total_scraped == 0:
+        return False
+
+    rows = supabase_load_reviews(app_id)
+    if not rows:
+        return False
+
+    for row in rows:
+        review = {
+            "reviewId":      row.get("review_id"),
+            "content":       row.get("content"),
+            "score":         row.get("score"),
+            "at":            row.get("review_date"),
+            "thumbsUpCount": row.get("thumbs_up"),
+            "replyContent":  row.get("reply_content"),
+            "repliedAt":     row.get("replied_at"),
+        }
+        rid = review.get("reviewId")
+        if rid and rid not in st.session_state.seen_review_ids:
+            st.session_state.seen_review_ids.add(rid)
+            st.session_state.all_reviews.append(review)
+
+    saved_token = token_row.get("continuation_token")
+    st.session_state.current_token = saved_token if saved_token else None
+    st.session_state.scraping = True
+    st.session_state.scrape_start = time.time()
+
+    return True
 
 
 st.markdown("""
@@ -50,8 +174,9 @@ ROBERTA_BATCH_SIZE = 100
 ROBERTA_MAX_LENGTH = 128
 CHECKPOINT_INTERVAL = 50000
 CHECKPOINT_DIR = "checkpoints"
+SUPABASE_SAVE_EVERY = 1000
 
-SCRAPE_MAX_REVIEWS = 1_000_000  # Hard cap at 1 million reviews
+SCRAPE_MAX_REVIEWS = 1_000_000
 
 
 def safe_name(text):
@@ -135,8 +260,8 @@ def build_query_plan():
     for country in COUNTRY_OPTIONS:
         for sort_name, sort_value in SORT_OPTIONS:
             plan.append({
-                "country": country,
-                "sort_name": sort_name,
+                "country":    country,
+                "sort_name":  sort_name,
                 "sort_value": sort_value,
             })
     return plan
@@ -177,45 +302,23 @@ def clear_selected_app():
 
 
 def restart_app_state():
+    if st.session_state.get("checked_app_id"):
+        supabase_delete_app_data(st.session_state.checked_app_id)
+
     keys_to_clear = [
-        "checked_app_id",
-        "checked_app_title",
-        "checked_app_icon",
-        "total_reviews_reported",
-        "corrected_total_reviews",
-        "scrapable_reviews",
-        "estimated_time_low",
-        "estimated_time_high",
-        "ready_to_scrape",
-        "scraping",
-        "scrape_done",
-        "cancel_requested",
-        "all_reviews",
-        "batch_index",
-        "scrape_start",
-        "app_input",
-        "loading_app",
-        "auto_download_ready",
-        "current_plan_index",
-        "current_token",
-        "current_query_rounds",
-        "current_stagnant_rounds",
-        "seen_review_ids",
-        "uploaded_raw_file",
-        "run_analysis_from_scrape",
-        "analysis_running",
-        "analysis_paused",
-        "analysis_done",
-        "analysis_raw_df",
-        "analysis_processed_parts",
-        "analysis_remaining_df",
-        "analysis_total_reviews",
-        "analysis_existing_processed",
-        "analysis_processed_count",
-        "analysis_skipped_count",
-        "analysis_app_id",
-        "analysis_source_id",
-        "download_checkpoint_ready",
+        "checked_app_id", "checked_app_title", "checked_app_icon",
+        "total_reviews_reported", "corrected_total_reviews", "scrapable_reviews",
+        "estimated_time_low", "estimated_time_high", "ready_to_scrape",
+        "scraping", "scrape_done", "cancel_requested", "all_reviews",
+        "batch_index", "scrape_start", "app_input", "loading_app",
+        "auto_download_ready", "current_plan_index", "current_token",
+        "current_query_rounds", "current_stagnant_rounds", "seen_review_ids",
+        "uploaded_raw_file", "run_analysis_from_scrape", "analysis_running",
+        "analysis_paused", "analysis_done", "analysis_raw_df",
+        "analysis_processed_parts", "analysis_remaining_df",
+        "analysis_total_reviews", "analysis_existing_processed",
+        "analysis_processed_count", "analysis_skipped_count",
+        "analysis_app_id", "analysis_source_id", "download_checkpoint_ready",
         "analysis_pause_requested",
     ]
 
@@ -248,13 +351,10 @@ def load_app_details():
         result = app(app_id, lang="en", country="ph")
         reported_total_reviews = int(result.get("reviews", 0) or 0)
 
-        load_progress.progress(100)
-        load_status.text("App details loaded.")
-        time.sleep(0.3)
+        load_progress.progress(60)
+        load_status.text("Checking for saved progress...")
 
-        load_progress.empty()
-        load_status.empty()
-
+        # ── AUTO-RESUME: check Supabase silently ──
         st.session_state.checked_app_id = app_id
         st.session_state.checked_app_title = result.get("title", app_id)
         st.session_state.checked_app_icon = result.get("icon")
@@ -262,6 +362,21 @@ def load_app_details():
         st.session_state.corrected_total_reviews = reported_total_reviews
         st.session_state.ready_to_scrape = True
         st.session_state.loading_app = False
+
+        resumed = load_from_supabase_if_available(app_id)
+
+        load_progress.progress(100)
+        if resumed:
+            load_status.text(f"Resumed from checkpoint: {len(st.session_state.all_reviews):,} reviews loaded.")
+        else:
+            load_status.text("App details loaded.")
+
+        time.sleep(0.5)
+        load_progress.empty()
+        load_status.empty()
+
+        if resumed:
+            st.rerun()
 
     except Exception as e:
         st.session_state.loading_app = False
@@ -277,6 +392,7 @@ def get_current_plan_item():
 
 def add_new_reviews(batch):
     added = 0
+    new_rows = []
     for row in batch:
         if len(st.session_state.all_reviews) >= SCRAPE_MAX_REVIEWS:
             break
@@ -284,10 +400,11 @@ def add_new_reviews(batch):
         if rid and rid not in st.session_state.seen_review_ids:
             st.session_state.seen_review_ids.add(rid)
             st.session_state.all_reviews.append(row)
+            new_rows.append(row)
             added += 1
 
     hit_cap = len(st.session_state.all_reviews) >= SCRAPE_MAX_REVIEWS
-    return added, hit_cap
+    return added, hit_cap, new_rows
 
 
 def map_roberta_label(label):
@@ -314,9 +431,7 @@ def prepare_analysis_df(raw_df):
 
     df.drop(
         ["userName", "userImage", "replyContent", "repliedAt", "appVersion"],
-        axis=1,
-        inplace=True,
-        errors="ignore"
+        axis=1, inplace=True, errors="ignore"
     )
 
     if "content" not in df.columns:
@@ -338,11 +453,9 @@ def prepare_analysis_df(raw_df):
         st.stop()
 
     df["score"] = pd.to_numeric(df["score"], errors="coerce")
-
     df = df[df["content"].notna()]
     df = df[df["content"].astype(str).str.strip() != ""]
     df = df.dropna(subset=["score"])
-
     df["reviewId"] = df["reviewId"].astype(str)
 
     df["clean_text"] = df["content"].astype(str).str.lower()
@@ -794,10 +907,10 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
 
             report.append({
-                "label": label,
+                "label":     label,
                 "precision": round(precision, 3),
-                "recall": round(recall, 3),
-                "f1_score": round(f1, 3)
+                "recall":    round(recall, 3),
+                "f1_score":  round(f1, 3)
             })
 
         report_df = pd.DataFrame(report)
@@ -1270,7 +1383,7 @@ with tab_load_files:
                 st.rerun()
 
 # ─────────────────────────────────────────────
-# UPDATED SCRAPING LOOP: early exit on date cutoff
+# SCRAPING LOOP
 # ─────────────────────────────────────────────
 if st.session_state.scraping and not st.session_state.cancel_requested:
     current_item = get_current_plan_item()
@@ -1285,24 +1398,40 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
             count=COUNT_PER_BATCH, continuation_token=st.session_state.current_token
         )
 
-        # add_new_reviews now returns (added_count, hit_cutoff)
-        added_count, hit_cutoff = add_new_reviews(batch)
+        added_count, hit_cutoff, new_rows = add_new_reviews(batch)
 
         st.session_state.batch_index += 1
         st.session_state.current_query_rounds += 1
 
-        # Save old token BEFORE overwriting so token_looped check is valid
         old_token = st.session_state.current_token
         st.session_state.current_token = new_token
 
-        # ── Early exit: entire batch was pre-cutoff, or 1M cap reached ──
+        # ── Save new rows to Supabase every SUPABASE_SAVE_EVERY reviews ──
+        total_so_far = len(st.session_state.all_reviews)
+        prev_total = total_so_far - added_count
+        crossed_checkpoint = (total_so_far // SUPABASE_SAVE_EVERY) > (prev_total // SUPABASE_SAVE_EVERY)
+
+        if new_rows and crossed_checkpoint:
+            supabase_save_reviews(st.session_state.checked_app_id, new_rows)
+            supabase_save_token(
+                st.session_state.checked_app_id,
+                new_token,
+                total_so_far
+            )
+
         if hit_cutoff:
+            # Final save before stopping
+            if new_rows:
+                supabase_save_reviews(st.session_state.checked_app_id, new_rows)
+            supabase_save_token(
+                st.session_state.checked_app_id,
+                new_token,
+                len(st.session_state.all_reviews)
+            )
             st.session_state.scraping = False
             st.session_state.scrape_done = True
             st.rerun()
 
-        # Stagnation: only when the batch is truly empty OR the token didn't
-        # advance (looped). Never increment just because a batch had duplicates.
         truly_done = len(batch) == 0
         token_looped = (new_token is not None and new_token == old_token)
 
@@ -1316,7 +1445,9 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
             st.session_state.current_token = None
             st.session_state.current_query_rounds = 0
             st.session_state.current_stagnant_rounds = 0
+
         st.rerun()
+
     except Exception as e:
         st.error(f"Scraping error: {e}")
         st.session_state.scraping = False
