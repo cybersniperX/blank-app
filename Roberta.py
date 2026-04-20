@@ -33,7 +33,11 @@ def get_supabase_client():
     return create_client(url, key)
 
 
-def supabase_save_reviews(app_id, batch):
+# ══════════════════════════════════════════
+# SUPABASE — SCRAPE
+# ══════════════════════════════════════════
+
+def supabase_save_scrape_reviews(app_id, batch):
     try:
         sb = get_supabase_client()
         rows = []
@@ -54,10 +58,10 @@ def supabase_save_reviews(app_id, batch):
         for i in range(0, len(rows), chunk_size):
             sb.table("scrape_checkpoints").upsert(rows[i:i + chunk_size]).execute()
     except Exception as e:
-        st.warning(f"Review save failed: {e}")
+        st.warning(f"Scrape save failed: {e}")
 
 
-def supabase_save_token(app_id, token, total_scraped):
+def supabase_save_scrape_token(app_id, token, total_scraped):
     try:
         sb = get_supabase_client()
         sb.table("scrape_tokens").upsert({
@@ -70,7 +74,7 @@ def supabase_save_token(app_id, token, total_scraped):
         st.warning(f"Token save failed: {e}")
 
 
-def supabase_load_token(app_id):
+def supabase_load_scrape_token(app_id):
     try:
         sb = get_supabase_client()
         result = sb.table("scrape_tokens").select("*").eq("app_id", app_id).execute()
@@ -81,7 +85,7 @@ def supabase_load_token(app_id):
         return None
 
 
-def supabase_load_reviews(app_id):
+def supabase_load_scrape_reviews(app_id):
     try:
         sb = get_supabase_client()
         all_rows = []
@@ -104,17 +108,17 @@ def supabase_load_reviews(app_id):
         return []
 
 
-def supabase_delete_app_data(app_id):
+def supabase_delete_scrape_data(app_id):
     try:
         sb = get_supabase_client()
         sb.table("scrape_checkpoints").delete().eq("app_id", app_id).execute()
         sb.table("scrape_tokens").delete().eq("app_id", app_id).execute()
     except Exception as e:
-        st.warning(f"Delete failed: {e}")
+        st.warning(f"Scrape delete failed: {e}")
 
 
-def load_from_supabase_if_available(app_id):
-    token_row = supabase_load_token(app_id)
+def load_scrape_from_supabase(app_id):
+    token_row = supabase_load_scrape_token(app_id)
     if not token_row:
         return False
 
@@ -122,7 +126,7 @@ def load_from_supabase_if_available(app_id):
     if total_scraped == 0:
         return False
 
-    rows = supabase_load_reviews(app_id)
+    rows = supabase_load_scrape_reviews(app_id)
     if not rows:
         return False
 
@@ -149,23 +153,141 @@ def load_from_supabase_if_available(app_id):
     return True
 
 
+# ══════════════════════════════════════════
+# SUPABASE — ANALYSIS
+# ══════════════════════════════════════════
+
+def supabase_save_analysis_batch(app_id, batch_rows):
+    try:
+        sb = get_supabase_client()
+        rows = []
+        for r in batch_rows:
+            rows.append({
+                "app_id":            app_id,
+                "review_id":         str(r.get("reviewId", "")),
+                "content":           r.get("content"),
+                "score":             r.get("score"),
+                "review_date":       str(r.get("reviewDate", "")) if r.get("reviewDate") else None,
+                "clean_text":        r.get("clean_text"),
+                "month":             r.get("month"),
+                "roberta_label":     r.get("roberta_label"),
+                "roberta_score":     r.get("roberta_score"),
+                "sentiment":         r.get("sentiment"),
+                "sentiment_score":   r.get("sentiment_score"),
+                "actual_label":      r.get("actual_label"),
+                "review_word_count": r.get("reviewWordCount"),
+            })
+        chunk_size = 500
+        for i in range(0, len(rows), chunk_size):
+            sb.table("analysis_checkpoints").upsert(rows[i:i + chunk_size]).execute()
+    except Exception as e:
+        st.warning(f"Analysis save failed: {e}")
+
+
+def supabase_save_analysis_token(app_id, total_processed, total_skipped, is_done=False):
+    try:
+        sb = get_supabase_client()
+        sb.table("analysis_tokens").upsert({
+            "app_id":          app_id,
+            "total_processed": total_processed,
+            "total_skipped":   total_skipped,
+            "is_done":         is_done,
+            "updated_at":      "now()"
+        }).execute()
+    except Exception as e:
+        st.warning(f"Analysis token save failed: {e}")
+
+
+def supabase_load_analysis_token(app_id):
+    try:
+        sb = get_supabase_client()
+        result = sb.table("analysis_tokens").select("*").eq("app_id", app_id).execute()
+        if result.data:
+            return result.data[0]
+        return None
+    except Exception:
+        return None
+
+
+def supabase_load_analysis_reviews(app_id):
+    try:
+        sb = get_supabase_client()
+        all_rows = []
+        page_size = 1000
+        offset = 0
+        while True:
+            result = sb.table("analysis_checkpoints") \
+                .select("*") \
+                .eq("app_id", app_id) \
+                .range(offset, offset + page_size - 1) \
+                .execute()
+            if not result.data:
+                break
+            all_rows.extend(result.data)
+            if len(result.data) < page_size:
+                break
+            offset += page_size
+        return all_rows
+    except Exception:
+        return []
+
+
+def supabase_delete_analysis_data(app_id):
+    try:
+        sb = get_supabase_client()
+        sb.table("analysis_checkpoints").delete().eq("app_id", app_id).execute()
+        sb.table("analysis_tokens").delete().eq("app_id", app_id).execute()
+    except Exception as e:
+        st.warning(f"Analysis delete failed: {e}")
+
+
+def load_analysis_from_supabase(app_id, full_df):
+    token_row = supabase_load_analysis_token(app_id)
+    if not token_row:
+        return False
+
+    total_processed = token_row.get("total_processed", 0)
+    if total_processed == 0:
+        return False
+
+    rows = supabase_load_analysis_reviews(app_id)
+    if not rows:
+        return False
+
+    checkpoint_df = pd.DataFrame(rows)
+
+    # Rename columns back to match app format
+    rename_map = {
+        "review_id":         "reviewId",
+        "review_date":       "reviewDate",
+        "review_word_count": "reviewWordCount",
+    }
+    checkpoint_df.rename(columns=rename_map, inplace=True)
+    checkpoint_df["reviewId"] = checkpoint_df["reviewId"].astype(str)
+
+    done_ids = set(checkpoint_df["reviewId"].dropna())
+    remaining_df = full_df[~full_df["reviewId"].isin(done_ids)].copy()
+
+    st.session_state.analysis_processed_parts = [checkpoint_df]
+    st.session_state.analysis_remaining_df = remaining_df
+    st.session_state.analysis_existing_processed = len(checkpoint_df)
+    st.session_state.analysis_processed_count = 0
+    st.session_state.analysis_skipped_count = token_row.get("total_skipped", 0)
+    st.session_state.analysis_running = True
+    st.session_state.analysis_paused = False
+    st.session_state.analysis_done = token_row.get("is_done", False)
+
+    return True
+
+
 st.markdown("""
 <style>
-.small-stat-label {
-    font-size: 12px;
-    color: #666;
-}
-.small-stat-value {
-    font-size: 18px;
-    font-weight: 600;
-}
+.small-stat-label { font-size: 12px; color: #666; }
+.small-stat-value { font-size: 18px; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
-SORT_OPTIONS = [
-    ("Newest", Sort.NEWEST),
-]
-
+SORT_OPTIONS = [("Newest", Sort.NEWEST)]
 COUNTRY_OPTIONS = ["ph"]
 
 COUNT_PER_BATCH = 200
@@ -192,19 +314,13 @@ def get_analysis_source_id(app_id=None, raw_filename=None):
 
 
 def clear_saved_checkpoints():
-    checkpoint_patterns = [
-        "latest_checkpoint.csv",
-        "checkpoint_*.csv",
-        "*checkpoint*.csv",
-    ]
-
+    checkpoint_patterns = ["latest_checkpoint.csv", "checkpoint_*.csv", "*checkpoint*.csv"]
     for pattern in checkpoint_patterns:
         for file_path in glob.glob(pattern):
             try:
                 os.remove(file_path)
             except Exception:
                 pass
-
     if os.path.exists(CHECKPOINT_DIR):
         for file_path in glob.glob(os.path.join(CHECKPOINT_DIR, "*.csv")):
             try:
@@ -244,14 +360,12 @@ def extract_app_id_from_input(value):
     text = (value or "").strip()
     if not text:
         return None
-
     if "play.google.com" in text:
         try:
             parsed = urlparse(text)
             return parse_qs(parsed.query).get("id", [None])[0]
         except Exception:
             return None
-
     return text
 
 
@@ -303,7 +417,8 @@ def clear_selected_app():
 
 def restart_app_state():
     if st.session_state.get("checked_app_id"):
-        supabase_delete_app_data(st.session_state.checked_app_id)
+        supabase_delete_scrape_data(st.session_state.checked_app_id)
+        supabase_delete_analysis_data(st.session_state.checked_app_id)
 
     keys_to_clear = [
         "checked_app_id", "checked_app_title", "checked_app_icon",
@@ -319,7 +434,7 @@ def restart_app_state():
         "analysis_total_reviews", "analysis_existing_processed",
         "analysis_processed_count", "analysis_skipped_count",
         "analysis_app_id", "analysis_source_id", "download_checkpoint_ready",
-        "analysis_pause_requested",
+        "analysis_pause_requested", "confirm_restart",
     ]
 
     for key in keys_to_clear:
@@ -354,7 +469,6 @@ def load_app_details():
         load_progress.progress(60)
         load_status.text("Checking for saved progress...")
 
-        # ── AUTO-RESUME: check Supabase silently ──
         st.session_state.checked_app_id = app_id
         st.session_state.checked_app_title = result.get("title", app_id)
         st.session_state.checked_app_icon = result.get("icon")
@@ -363,11 +477,11 @@ def load_app_details():
         st.session_state.ready_to_scrape = True
         st.session_state.loading_app = False
 
-        resumed = load_from_supabase_if_available(app_id)
+        scrape_resumed = load_scrape_from_supabase(app_id)
 
         load_progress.progress(100)
-        if resumed:
-            load_status.text(f"Resumed from checkpoint: {len(st.session_state.all_reviews):,} reviews loaded.")
+        if scrape_resumed:
+            load_status.text(f"Resumed scraping: {len(st.session_state.all_reviews):,} reviews loaded.")
         else:
             load_status.text("App details loaded.")
 
@@ -375,7 +489,7 @@ def load_app_details():
         load_progress.empty()
         load_status.empty()
 
-        if resumed:
+        if scrape_resumed:
             st.rerun()
 
     except Exception as e:
@@ -469,49 +583,7 @@ def prepare_analysis_df(raw_df):
     return df
 
 
-def prepare_checkpoint_df(checkpoint_df):
-    if checkpoint_df is None:
-        return None
-
-    df = checkpoint_df.copy()
-
-    if "reviewId" not in df.columns:
-        st.error("The checkpoint file does not contain a 'reviewId' column.")
-        st.stop()
-
-    df["reviewId"] = df["reviewId"].astype(str)
-    return df
-
-
-def get_checkpoint_path(source_id):
-    safe_source_id = safe_name(source_id)
-    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
-    return os.path.join(CHECKPOINT_DIR, f"{safe_source_id}_latest_checkpoint.csv")
-
-
-def save_latest_checkpoint(df, source_id):
-    checkpoint_path = get_checkpoint_path(source_id)
-    df.to_csv(checkpoint_path, index=False)
-    return checkpoint_path
-
-
-def load_latest_checkpoint(source_id):
-    checkpoint_path = get_checkpoint_path(source_id)
-    if os.path.exists(checkpoint_path):
-        try:
-            return pd.read_csv(checkpoint_path)
-        except Exception:
-            return None
-    return None
-
-
-def delete_latest_checkpoint(source_id):
-    checkpoint_path = get_checkpoint_path(source_id)
-    if os.path.exists(checkpoint_path):
-        os.remove(checkpoint_path)
-
-
-def start_analysis(raw_df, checkpoint_df=None, source_id=None):
+def start_analysis(raw_df, source_id=None):
     df = prepare_analysis_df(raw_df)
 
     if source_id is None:
@@ -520,33 +592,26 @@ def start_analysis(raw_df, checkpoint_df=None, source_id=None):
             raw_filename=None
         )
 
-    if checkpoint_df is None:
-        checkpoint_df = load_latest_checkpoint(source_id)
+    app_id = st.session_state.get("checked_app_id")
 
-    checkpoint_df = prepare_checkpoint_df(checkpoint_df)
+    # Try to resume from Supabase first
+    resumed = False
+    if app_id:
+        resumed = load_analysis_from_supabase(app_id, df)
 
-    existing_processed = 0
-    processed_parts = []
+    if not resumed:
+        st.session_state.analysis_processed_parts = []
+        st.session_state.analysis_remaining_df = df.copy()
+        st.session_state.analysis_existing_processed = 0
+        st.session_state.analysis_processed_count = 0
+        st.session_state.analysis_skipped_count = 0
+        st.session_state.analysis_running = True
+        st.session_state.analysis_paused = False
+        st.session_state.analysis_done = False
 
-    if checkpoint_df is not None and not checkpoint_df.empty:
-        done_ids = set(checkpoint_df["reviewId"].dropna().astype(str))
-        remaining_df = df[~df["reviewId"].isin(done_ids)].copy()
-        processed_parts.append(checkpoint_df)
-        existing_processed = len(checkpoint_df)
-    else:
-        remaining_df = df.copy()
-
-    st.session_state.analysis_running = True
-    st.session_state.analysis_paused = False
-    st.session_state.analysis_done = False
     st.session_state.analysis_raw_df = df
-    st.session_state.analysis_processed_parts = processed_parts
-    st.session_state.analysis_remaining_df = remaining_df
     st.session_state.analysis_total_reviews = len(df)
-    st.session_state.analysis_existing_processed = existing_processed
-    st.session_state.analysis_processed_count = 0
-    st.session_state.analysis_skipped_count = 0
-    st.session_state.analysis_app_id = st.session_state.get("checked_app_id")
+    st.session_state.analysis_app_id = app_id
     st.session_state.analysis_source_id = source_id
     st.session_state.download_checkpoint_ready = False
     st.session_state.analysis_pause_requested = False
@@ -561,6 +626,14 @@ def process_analysis_batch():
     if remaining_df is None or remaining_df.empty:
         st.session_state.analysis_running = False
         st.session_state.analysis_done = True
+        app_id = st.session_state.get("analysis_app_id")
+        if app_id:
+            supabase_save_analysis_token(
+                app_id,
+                st.session_state.analysis_existing_processed + st.session_state.analysis_processed_count,
+                st.session_state.analysis_skipped_count,
+                is_done=True
+            )
         return
 
     sentiment_model = load_roberta_model()
@@ -624,24 +697,18 @@ def process_analysis_batch():
     st.session_state.analysis_processed_parts.append(pd.DataFrame(batch_rows))
     st.session_state.analysis_remaining_df = next_remaining_df
 
-    overall_done = (
-        st.session_state.analysis_existing_processed
-        + st.session_state.analysis_processed_count
-    )
-
-    if overall_done % CHECKPOINT_INTERVAL == 0 or st.session_state.analysis_remaining_df.empty:
-        current_checkpoint_df = pd.concat(
-            st.session_state.analysis_processed_parts,
-            ignore_index=True
+    # Save batch to Supabase
+    app_id = st.session_state.get("analysis_app_id")
+    if app_id:
+        supabase_save_analysis_batch(app_id, batch_rows)
+        supabase_save_analysis_token(
+            app_id,
+            st.session_state.analysis_existing_processed + st.session_state.analysis_processed_count,
+            st.session_state.analysis_skipped_count,
+            is_done=False
         )
-        save_latest_checkpoint(current_checkpoint_df, st.session_state.analysis_source_id)
 
     if st.session_state.analysis_pause_requested:
-        current_checkpoint_df = pd.concat(
-            st.session_state.analysis_processed_parts,
-            ignore_index=True
-        )
-        save_latest_checkpoint(current_checkpoint_df, st.session_state.analysis_source_id)
         st.session_state.analysis_running = False
         st.session_state.analysis_paused = True
         st.session_state.analysis_pause_requested = False
@@ -651,6 +718,13 @@ def process_analysis_batch():
     if st.session_state.analysis_remaining_df.empty:
         st.session_state.analysis_running = False
         st.session_state.analysis_done = True
+        if app_id:
+            supabase_save_analysis_token(
+                app_id,
+                st.session_state.analysis_existing_processed + st.session_state.analysis_processed_count,
+                st.session_state.analysis_skipped_count,
+                is_done=True
+            )
 
 
 def show_analysis_results(df_valid, checkpoint_df=None):
@@ -824,28 +898,13 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         st.subheader("Review Score Over Time")
 
         rating_trend = df_valid.groupby("month")["score"].mean().reset_index()
-        fig_rating = px.line(
-            rating_trend,
-            x="month",
-            y="score",
-            title="Average Review Score Over Time"
-        )
+        fig_rating = px.line(rating_trend, x="month", y="score", title="Average Review Score Over Time")
 
         volume = df_valid.groupby("month").size().reset_index(name="count")
-        fig_volume = px.line(
-            volume,
-            x="month",
-            y="count",
-            title="Review Volume Over Time"
-        )
+        fig_volume = px.line(volume, x="month", y="count", title="Review Volume Over Time")
 
         avg_sent = df_valid.groupby("month")["sentiment_score"].mean().reset_index()
-        fig_avg = px.line(
-            avg_sent,
-            x="month",
-            y="sentiment_score",
-            title="Average Sentiment Score Over Time"
-        )
+        fig_avg = px.line(avg_sent, x="month", y="sentiment_score", title="Average Sentiment Score Over Time")
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -859,22 +918,13 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         col1, col2 = st.columns(2)
 
-        fig_length = px.box(
-            df_valid,
-            x="score",
-            y="reviewWordCount",
-            title="Review Length by Rating"
-        )
+        fig_length = px.box(df_valid, x="score", y="reviewWordCount", title="Review Length by Rating")
         with col1:
             st.plotly_chart(fig_length, use_container_width=True)
 
         fig_scatter = px.scatter(
-            df_valid,
-            x="score",
-            y="reviewWordCount",
-            color="sentiment",
-            title="Review Length vs Rating",
-            opacity=0.6
+            df_valid, x="score", y="reviewWordCount", color="sentiment",
+            title="Review Length vs Rating", opacity=0.6
         )
         with col2:
             st.plotly_chart(fig_scatter, use_container_width=True)
@@ -882,10 +932,8 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         st.subheader("Predicted vs Actual")
 
         cm_df = pd.crosstab(
-            df_valid["actual_label"],
-            df_valid["sentiment"],
-            rownames=["Actual"],
-            colnames=["Predicted"]
+            df_valid["actual_label"], df_valid["sentiment"],
+            rownames=["Actual"], colnames=["Predicted"]
         )
 
         col1, col2 = st.columns(2)
@@ -919,20 +967,10 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             st.markdown("### Classification Report")
             st.dataframe(report_df, use_container_width=True)
 
-        fig_cm = px.imshow(
-            cm_df,
-            text_auto=True,
-            aspect="auto",
-            title="Confusion Matrix"
-        )
+        fig_cm = px.imshow(cm_df, text_auto=True, aspect="auto", title="Confusion Matrix")
 
         rating_sentiment = df_valid.groupby("score")["sentiment_score"].mean().reset_index()
-        fig = px.line(
-            rating_sentiment,
-            x="score",
-            y="sentiment_score",
-            title="Average Sentiment Score per Rating"
-        )
+        fig = px.line(rating_sentiment, x="score", y="sentiment_score", title="Average Sentiment Score per Rating")
 
         col1, col2 = st.columns(2)
         with col1:
@@ -942,7 +980,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
         df_valid["match"] = df_valid["actual_label"] == df_valid["sentiment"]
         accuracy = df_valid["match"].mean()
-
         st.write(f"Model Accuracy: {accuracy:.2%}")
 
         # =========================
@@ -984,12 +1021,9 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
             with col1:
                 st.markdown("### 1. Correlation Analysis")
-
                 corr_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
-
                 if len(corr_df) >= 2:
                     corr_value, corr_p = spearmanr(corr_df["sentiment_score"], corr_df["score"])
-
                     corr_result = pd.DataFrame({
                         "Metric": ["Spearman Correlation", "p-value", "Interpretation"],
                         "Value": [
@@ -998,15 +1032,12 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                             "Significant" if corr_p < 0.05 else "Not Significant"
                         ]
                     })
-
                     st.dataframe(corr_result, use_container_width=True)
 
             with col2:
                 st.markdown("### 2. Kruskal-Wallis Test by Month")
-
                 month_groups = []
                 monthly_grouped = stats_df.groupby("month")["sentiment_score"]
-
                 for month_name, values in monthly_grouped:
                     clean_vals = values.dropna().tolist()
                     if len(clean_vals) > 0:
@@ -1014,7 +1045,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
                 if len(month_groups) >= 2:
                     kw_stat, kw_p = kruskal(*month_groups)
-
                     kw_result = pd.DataFrame({
                         "Metric": ["Kruskal-Wallis Statistic", "p-value", "Interpretation"],
                         "Value": [
@@ -1023,7 +1053,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                             "Significant Difference Across Months" if kw_p < 0.05 else "No Significant Difference Across Months"
                         ]
                     })
-
                     st.dataframe(kw_result, use_container_width=True)
 
                     monthly_avg = (
@@ -1031,13 +1060,9 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                         .mean()
                         .sort_values("month")
                     )
-
                     fig_kw = px.line(
-                        monthly_avg,
-                        x="month",
-                        y="sentiment_score",
-                        markers=True,
-                        title="Average Sentiment Score by Month"
+                        monthly_avg, x="month", y="sentiment_score",
+                        markers=True, title="Average Sentiment Score by Month"
                     )
                     st.plotly_chart(fig_kw, use_container_width=True)
                 else:
@@ -1045,49 +1070,33 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
             with col3:
                 st.markdown("### 4. Regression Analysis")
-
                 reg_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
-
                 if len(reg_df) >= 2:
                     slope, intercept, r_value, p_value, std_err = linregress(
-                        reg_df["sentiment_score"],
-                        reg_df["score"]
+                        reg_df["sentiment_score"], reg_df["score"]
                     )
-
                     r_squared = r_value ** 2
-
                     reg_result = pd.DataFrame({
                         "Metric": ["Slope", "Intercept", "R", "R-squared", "p-value", "Std. Error", "Interpretation"],
                         "Value": [
-                            round(slope, 4),
-                            round(intercept, 4),
-                            round(r_value, 4),
-                            round(r_squared, 4),
-                            round(p_value, 6),
-                            round(std_err, 6),
+                            round(slope, 4), round(intercept, 4), round(r_value, 4),
+                            round(r_squared, 4), round(p_value, 6), round(std_err, 6),
                             "Significant Predictor" if p_value < 0.05 else "Not a Significant Predictor"
                         ]
                     })
-
                     st.dataframe(reg_result, use_container_width=True)
 
                     fig_reg = px.scatter(
-                        reg_df,
-                        x="sentiment_score",
-                        y="score",
-                        title="Regression: Sentiment Score Predicting Rating",
-                        trendline="ols"
+                        reg_df, x="sentiment_score", y="score",
+                        title="Regression: Sentiment Score Predicting Rating", trendline="ols"
                     )
                     st.plotly_chart(fig_reg, use_container_width=True)
-
-                    st.write(
-                        f"Regression equation: Rating = {round(intercept, 4)} + ({round(slope, 4)} x Sentiment Score)"
-                    )
+                    st.write(f"Regression equation: Rating = {round(intercept, 4)} + ({round(slope, 4)} x Sentiment Score)")
                 else:
                     st.warning("Not enough data for regression analysis.")
 
         # =========================
-        # TOP 500 WORDS ANALYSIS
+        # TOP 500 WORDS
         # =========================
         st.subheader("Top 500 Words")
 
@@ -1098,14 +1107,12 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             "just", "can", "will", "from", "all", "get", "when", "about", "their",
             "there", "then", "been", "would", "could", "should", "ever", "since"
         ]
-
         filipino_stops = [
             "ang", "mga", "ng", "sa", "na", "lang", "din", "rin", "po", "opo",
             "nag", "nyo", "mo", "ko", "namin", "nila", "ito", "iyon", "doon",
             "dito", "naman", "talaga", "pa", "kung", "pag", "kasi", "dahil",
             "pero", "kaya", "siya", "nito", "ni", "una", "tapos", "naka", "sana"
         ]
-
         context_stops = [
             "shopee", "lazada", "app", "item", "items", "seller", "delivery",
             "order", "orders", "parcel", "please", "update", "version", "using",
@@ -1142,19 +1149,15 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             display_df = display_df.sort_values(by="reviewDate", ascending=False)
         st.dataframe(display_df, use_container_width=True)
         csv = display_df.to_csv(index=False).encode("utf-8")
-        st.download_button(label="Download Processed Data", data=csv, file_name="processed_reviews.csv", mime="text/csv")
+        st.download_button(
+            label="Download Processed Data", data=csv,
+            file_name="processed_reviews.csv", mime="text/csv"
+        )
 
         st.write(f"Skipped Reviews: {skipped_count}")
 
-        if st.session_state.get("analysis_source_id"):
-            delete_latest_checkpoint(st.session_state.analysis_source_id)
-
     except Exception as e:
         st.error(f"Error reading file: {e}")
-
-
-def run_analysis(raw_df, checkpoint_df=None):
-    show_analysis_results(raw_df, checkpoint_df)
 
 
 defaults = {
@@ -1196,11 +1199,24 @@ defaults = {
     "analysis_source_id": None,
     "download_checkpoint_ready": False,
     "analysis_pause_requested": False,
+    "confirm_restart": False,
 }
 
 for key, value in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
+
+# ── AUTO-RESUME ANALYSIS ON PAGE LOAD ──
+if (
+    not st.session_state.analysis_running
+    and not st.session_state.analysis_done
+    and st.session_state.get("checked_app_id")
+    and st.session_state.get("analysis_raw_df") is not None
+):
+    app_id = st.session_state.checked_app_id
+    token_row = supabase_load_analysis_token(app_id)
+    if token_row and token_row.get("total_processed", 0) > 0 and not token_row.get("is_done"):
+        load_analysis_from_supabase(app_id, st.session_state.analysis_raw_df)
 
 
 top_col1, top_col2 = st.columns([5, 1])
@@ -1209,9 +1225,26 @@ with top_col1:
     st.write("")
 
 with top_col2:
-    if st.button("Restart", use_container_width=True):
-        clear_saved_checkpoints()
-        restart_app_state()
+    if st.session_state.get("analysis_running") or st.session_state.get("analysis_paused"):
+        if st.button("Restart", use_container_width=True):
+            st.session_state.confirm_restart = True
+
+        if st.session_state.get("confirm_restart"):
+            st.warning("Analysis is in progress. Are you sure you want to restart? This will reset everything.")
+            confirm_col1, confirm_col2 = st.columns(2)
+            with confirm_col1:
+                if st.button("Yes, restart", use_container_width=True):
+                    st.session_state.confirm_restart = False
+                    clear_saved_checkpoints()
+                    restart_app_state()
+            with confirm_col2:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.confirm_restart = False
+                    st.rerun()
+    else:
+        if st.button("Restart", use_container_width=True):
+            clear_saved_checkpoints()
+            restart_app_state()
 
 tab_find_app, tab_load_files = st.tabs(["Find an App", "Load Files"])
 
@@ -1255,7 +1288,6 @@ with tab_find_app:
                     if st.button("Pause", use_container_width=True):
                         st.session_state.analysis_pause_requested = True
                         st.rerun()
-
                 elif st.session_state.download_checkpoint_ready:
                     if st.button("Resume", use_container_width=True):
                         st.session_state.analysis_running = True
@@ -1263,7 +1295,6 @@ with tab_find_app:
                         st.session_state.analysis_pause_requested = False
                         st.session_state.download_checkpoint_ready = False
                         st.rerun()
-
                 else:
                     if st.button("Analyze", use_container_width=True):
                         raw_df = pd.DataFrame(st.session_state.all_reviews)
@@ -1282,7 +1313,6 @@ with tab_find_app:
                 df_download = pd.DataFrame(st.session_state.all_reviews)
                 csv_bytes = df_download.to_csv(index=False).encode("utf-8")
                 download_name = safe_name(st.session_state.checked_app_id or "reviews")
-
                 st.download_button(
                     label="Save",
                     data=csv_bytes,
@@ -1306,7 +1336,6 @@ with tab_find_app:
                     current_total = len(st.session_state.all_reviews)
                     estimated_total = max(st.session_state.corrected_total_reviews or 1, 1)
                     progress_ratio = min(current_total / estimated_total, 1.0)
-
                     st.caption(f"Scraped Reviews: {current_total:,}")
                     st.progress(progress_ratio)
 
@@ -1370,11 +1399,9 @@ with tab_load_files:
                     reset_analysis_state()
                     start_analysis(raw_df, source_id=source_id)
                     st.rerun()
-
             elif button_label == "Pause":
                 st.session_state.analysis_pause_requested = True
                 st.rerun()
-
             elif button_label == "Resume":
                 st.session_state.analysis_running = True
                 st.session_state.analysis_paused = False
@@ -1406,24 +1433,22 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
         old_token = st.session_state.current_token
         st.session_state.current_token = new_token
 
-        # ── Save new rows to Supabase every SUPABASE_SAVE_EVERY reviews ──
         total_so_far = len(st.session_state.all_reviews)
         prev_total = total_so_far - added_count
         crossed_checkpoint = (total_so_far // SUPABASE_SAVE_EVERY) > (prev_total // SUPABASE_SAVE_EVERY)
 
         if new_rows and crossed_checkpoint:
-            supabase_save_reviews(st.session_state.checked_app_id, new_rows)
-            supabase_save_token(
+            supabase_save_scrape_reviews(st.session_state.checked_app_id, new_rows)
+            supabase_save_scrape_token(
                 st.session_state.checked_app_id,
                 new_token,
                 total_so_far
             )
 
         if hit_cutoff:
-            # Final save before stopping
             if new_rows:
-                supabase_save_reviews(st.session_state.checked_app_id, new_rows)
-            supabase_save_token(
+                supabase_save_scrape_reviews(st.session_state.checked_app_id, new_rows)
+            supabase_save_scrape_token(
                 st.session_state.checked_app_id,
                 new_token,
                 len(st.session_state.all_reviews)
