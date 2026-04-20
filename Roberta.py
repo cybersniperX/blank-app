@@ -57,8 +57,38 @@ def supabase_save_scrape_reviews(app_id, batch):
         chunk_size = 500
         for i in range(0, len(rows), chunk_size):
             sb.table("scrape_checkpoints").upsert(rows[i:i + chunk_size]).execute()
+        st.toast(f"Scrape checkpoint saved: {len(st.session_state.all_reviews):,} reviews")
     except Exception as e:
-        st.warning(f"Scrape save failed: {e}")
+        st.warning(f"Review save failed: {e}")
+
+
+def supabase_save_analysis_batch(app_id, batch_rows):
+    try:
+        sb = get_supabase_client()
+        rows = []
+        for r in batch_rows:
+            rows.append({
+                "app_id":            app_id,
+                "review_id":         str(r.get("reviewId", "")),
+                "content":           r.get("content"),
+                "score":             r.get("score"),
+                "review_date":       str(r.get("reviewDate", "")) if r.get("reviewDate") else None,
+                "clean_text":        r.get("clean_text"),
+                "month":             r.get("month"),
+                "roberta_label":     r.get("roberta_label"),
+                "roberta_score":     r.get("roberta_score"),
+                "sentiment":         r.get("sentiment"),
+                "sentiment_score":   r.get("sentiment_score"),
+                "actual_label":      r.get("actual_label"),
+                "review_word_count": r.get("reviewWordCount"),
+            })
+        chunk_size = 500
+        for i in range(0, len(rows), chunk_size):
+            sb.table("analysis_checkpoints").upsert(rows[i:i + chunk_size]).execute()
+        overall_done = st.session_state.analysis_existing_processed + st.session_state.analysis_processed_count
+        st.toast(f"Analysis checkpoint saved: {overall_done:,} reviews processed")
+    except Exception as e:
+        st.warning(f"Analysis save failed: {e}")
 
 
 def supabase_save_scrape_token(app_id, token, total_scraped):
