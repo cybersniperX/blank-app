@@ -176,7 +176,9 @@ def load_scrape_from_supabase(app_id):
             st.session_state.all_reviews.append(review)
 
     saved_token = token_row.get("continuation_token")
-    st.session_state.current_token = saved_token if saved_token else None
+    # Reset token to None so scraper restarts from beginning
+    # but keeps all already-scraped reviews loaded from Supabase
+    st.session_state.current_token = None
     st.session_state.scraping = True
     st.session_state.scrape_start = time.time()
 
