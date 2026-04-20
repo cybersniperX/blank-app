@@ -51,10 +51,6 @@ ROBERTA_MAX_LENGTH = 128
 CHECKPOINT_INTERVAL = 50000
 CHECKPOINT_DIR = "checkpoints"
 
-# ─────────────────────────────────────────────
-# DATE CUTOFF FOR SCRAPING (2025 onwards)
-# ─────────────────────────────────────────────
-SCRAPE_YEAR_CUTOFF = 2025
 SCRAPE_MAX_REVIEWS = 1_000_000  # Hard cap at 1 million reviews
 
 
@@ -279,48 +275,19 @@ def get_current_plan_item():
     return plan[st.session_state.current_plan_index]
 
 
-# ─────────────────────────────────────────────
-# UPDATED: add_new_reviews filters by SCRAPE_YEAR_CUTOFF and respects SCRAPE_MAX_REVIEWS cap.
-# hit_cutoff is only True when the ENTIRE batch has zero qualifying reviews,
-# meaning we've paginated fully past the cutoff date.
-# ─────────────────────────────────────────────
 def add_new_reviews(batch):
     added = 0
-    qualified_in_batch = 0  # how many reviews in this batch pass the date filter
-
     for row in batch:
-        # Stop collecting if we've hit the 1M cap
         if len(st.session_state.all_reviews) >= SCRAPE_MAX_REVIEWS:
             break
-
         rid = row.get("reviewId")
-
-        # Date filter: skip reviews older than the cutoff year
-        review_date = row.get("at")
-        if review_date is not None:
-            try:
-                parsed_date = pd.to_datetime(review_date)
-                if parsed_date.year < SCRAPE_YEAR_CUTOFF:
-                    continue  # skip old review but keep scanning the batch
-            except Exception:
-                pass  # If date can't be parsed, allow the review through
-
-        # This review passes the date filter
-        qualified_in_batch += 1
-
         if rid and rid not in st.session_state.seen_review_ids:
             st.session_state.seen_review_ids.add(rid)
             st.session_state.all_reviews.append(row)
             added += 1
 
-    # Only signal cutoff when the whole batch had zero qualifying reviews —
-    # meaning we've fully scrolled past the 2025+ window.
-    hit_cutoff = (len(batch) > 0 and qualified_in_batch == 0)
-
-    # Also signal done if we've hit the 1M cap
     hit_cap = len(st.session_state.all_reviews) >= SCRAPE_MAX_REVIEWS
-
-    return added, hit_cutoff or hit_cap
+    return added, hit_cap
 
 
 def map_roberta_label(label):
@@ -365,9 +332,6 @@ def prepare_analysis_df(raw_df):
 
     if "reviewDate" in df.columns:
         df["reviewDate"] = pd.to_datetime(df["reviewDate"], errors="coerce")
-        # NOTE: No year filter needed here — scraping already filters to 2025+.
-        # Keeping a safety net filter for uploaded files that may contain older data.
-        df = df[df["reviewDate"].dt.year >= SCRAPE_YEAR_CUTOFF]
 
     if "score" not in df.columns:
         st.error("The uploaded raw file does not contain a 'score' column.")
@@ -1324,22 +1288,27 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
         # add_new_reviews now returns (added_count, hit_cutoff)
         added_count, hit_cutoff = add_new_reviews(batch)
 
-        # ── Early exit: we've reached reviews older than SCRAPE_YEAR_CUTOFF ──
+        st.session_state.batch_index += 1
+        st.session_state.current_query_rounds += 1
+
+        # Save old token BEFORE overwriting so token_looped check is valid
+        old_token = st.session_state.current_token
+        st.session_state.current_token = new_token
+
+        # ── Early exit: entire batch was pre-cutoff, or 1M cap reached ──
         if hit_cutoff:
             st.session_state.scraping = False
             st.session_state.scrape_done = True
             st.rerun()
 
-        st.session_state.batch_index += 1
-        st.session_state.current_query_rounds += 1
-        st.session_state.current_token = new_token
-
+        # Stagnation: only when the batch is truly empty OR the token didn't
+        # advance (looped). Never increment just because a batch had duplicates.
         truly_done = len(batch) == 0
-        token_looped = (new_token is not None and new_token == st.session_state.current_token)
+        token_looped = (new_token is not None and new_token == old_token)
 
         if truly_done or token_looped:
             st.session_state.current_stagnant_rounds += 1
-        elif added_count > 0:
+        else:
             st.session_state.current_stagnant_rounds = 0
 
         if new_token is None or st.session_state.current_stagnant_rounds >= 10 or st.session_state.current_query_rounds >= SCRAPE_MAX_ROUNDS_PER_QUERY:
