@@ -277,14 +277,8 @@ def add_new_reviews(batch):
     added = 0
     for row in batch:
         rid = row.get("reviewId")
-        # Filter: Exclude reviews older than 2024
-        review_at = row.get("at")
-        is_post_2024 = True
-        if review_at and hasattr(review_at, 'year'):
-            if review_at.year < 2024:
-                is_post_2024 = False
-        
-        if rid and rid not in st.session_state.seen_review_ids and is_post_2024:
+        # We no longer filter by year here so the scraper keeps running
+        if rid and rid not in st.session_state.seen_review_ids:
             st.session_state.seen_review_ids.add(rid)
             st.session_state.all_reviews.append(row)
             added += 1
@@ -333,6 +327,10 @@ def prepare_analysis_df(raw_df):
 
     if "reviewDate" in df.columns:
         df["reviewDate"] = pd.to_datetime(df["reviewDate"], errors="coerce")
+        # ---------------------------------------------------------
+        # NEW FILTER: Only keep reviews from 2024 onwards for analysis
+        # ---------------------------------------------------------
+        df = df[df["reviewDate"].dt.year >= 2024]
 
     if "score" not in df.columns:
         st.error("The uploaded raw file does not contain a 'score' column.")
@@ -355,7 +353,6 @@ def prepare_analysis_df(raw_df):
         df["month"] = df["reviewDate"].dt.to_period("M").astype(str)
 
     return df
-
 
 def prepare_checkpoint_df(checkpoint_df):
     if checkpoint_df is None:
