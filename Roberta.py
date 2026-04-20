@@ -546,9 +546,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
     try:
         df_valid = df_valid.copy()
-        df_valid["score"] = pd.to_numeric(df_valid["score"], errors="coerce")
-        df_valid["sentiment_score"] = pd.to_numeric(df_valid.get("sentiment_score", 0), errors="coerce")
-        
         skipped_count = (df_valid["sentiment"] == "skipped").sum() if "sentiment" in df_valid.columns else 0
 
         df_valid = df_valid[df_valid["sentiment"] != "skipped"].copy()
@@ -668,6 +665,49 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             st.plotly_chart(fig_pie, use_container_width=True)
         with col3:
             st.plotly_chart(fig_heatmap, use_container_width=True)
+
+        st.subheader("Classified Summary")
+
+        actual_summary = df_valid["actual_label"].value_counts().reset_index()
+        actual_summary.columns = ["actual_label", "total_count"]
+
+        fig_actual_bar = px.bar(
+            actual_summary,
+            x="actual_label",
+            y="total_count",
+            text="total_count",
+            title="Count of Classified Labels"
+        )
+        fig_actual_bar.update_traces(textposition="outside")
+
+        fig_actual_pie = px.pie(
+            actual_summary,
+            names="actual_label",
+            values="total_count",
+            title="Classified Label Distribution"
+        )
+
+        actual_heatmap = df_valid.groupby(["month", "actual_label"]).size().reset_index(name="count")
+        actual_pivot = actual_heatmap.pivot(
+            index="actual_label",
+            columns="month",
+            values="count"
+        ).fillna(0)
+
+        fig_actual_heatmap = px.imshow(
+            actual_pivot,
+            text_auto=True,
+            aspect="auto",
+            title="Monthly Classified Heatmap"
+        )
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.plotly_chart(fig_actual_bar, use_container_width=True)
+        with col2:
+            st.plotly_chart(fig_actual_pie, use_container_width=True)
+        with col3:
+            st.plotly_chart(fig_actual_heatmap, use_container_width=True)
 
         st.subheader("Review Score Over Time")
 
@@ -828,7 +868,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
             stats_df["rating_class"] = stats_df["score"].apply(classify_rating)
 
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
 
             with col1:
                 st.markdown("### 1. Correlation Analysis")
@@ -849,52 +889,9 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
                     st.dataframe(corr_result, use_container_width=True)
 
-                    fig_corr = px.scatter(
-                        corr_df,
-                        x="sentiment_score",
-                        y="score",
-                        title="Sentiment Score vs Star Rating",
-                        trendline="ols"
-                    )
-                    st.plotly_chart(fig_corr, use_container_width=True)
-                else:
-                    st.warning("Not enough data for correlation analysis.")
-
+                    
             with col2:
-                st.markdown("### 2. Chi-square Test")
-
-                chi_table = pd.crosstab(stats_df["sentiment"], stats_df["rating_class"])
-
-                if chi_table.shape[0] >= 2 and chi_table.shape[1] >= 2:
-                    chi2, p, dof, expected = chi2_contingency(chi_table)
-
-                    chi_result = pd.DataFrame({
-                        "Metric": ["Chi-square", "p-value", "Degrees of Freedom", "Interpretation"],
-                        "Value": [
-                            round(chi2, 4),
-                            round(p, 6),
-                            dof,
-                            "Significant Association" if p < 0.05 else "No Significant Association"
-                        ]
-                    })
-
-                    st.dataframe(chi_result, use_container_width=True)
-                    st.dataframe(chi_table, use_container_width=True)
-
-                    fig_chi = px.imshow(
-                        chi_table,
-                        text_auto=True,
-                        aspect="auto",
-                        title="Sentiment Class vs Rating Class"
-                    )
-                    st.plotly_chart(fig_chi, use_container_width=True)
-                else:
-                    st.warning("Not enough category variation for chi-square test.")
-
-            col3, col4 = st.columns(2)
-
-            with col3:
-                st.markdown("### 3. Kruskal-Wallis Test by Month")
+                st.markdown("### 2. Kruskal-Wallis Test by Month")
 
                 month_groups = []
                 monthly_grouped = stats_df.groupby("month")["sentiment_score"]
@@ -935,7 +932,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough monthly groups for Kruskal-Wallis test.")
 
-            with col4:
+            with col3:
                 st.markdown("### 4. Regression Analysis")
 
                 reg_df = stats_df.dropna(subset=["sentiment_score", "score"]).copy()
@@ -978,16 +975,38 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough data for regression analysis.")
 
-        st.subheader("Top 200 Words by Sentiment")
+# =========================
+        # TOP 500 WORDS ANALYSIS
+        # =========================
+        st.subheader("Top 500 Words")
 
-        col1, col2 = st.columns(2)
-
-        default_stopwords = [
+        # Base English Stop Words
+        english_stops = [
             "the", "and", "is", "to", "of", "in", "for", "on", "with", "this",
-            "that", "it", "my", "app", "very", "so", "but", "are", "was", "be",
-            "have", "has", "had", "not", "at", "you", "we", "they", "i", "ang",
-            "nag", "your", "nyo"
+            "that", "it", "my", "very", "so", "but", "are", "was", "be",
+            "have", "has", "had", "not", "at", "you", "we", "they", "i", "your",
+            "just", "can", "will", "from", "all", "get", "when", "about", "their",
+            "there", "then", "been", "would", "could", "should", "ever", "since"
         ]
+
+        # Filipino/Taglish particles and linkers
+        filipino_stops = [
+            "ang", "mga", "ng", "sa", "na", "lang", "din", "rin", "po", "opo",
+            "nag", "nyo", "mo", "ko", "namin", "nila", "ito", "iyon", "doon",
+            "dito", "naman", "talaga", "pa", "kung", "pag", "kasi", "dahil", 
+            "pero", "kaya", "siya", "nito", "ni", "una", "tapos", "naka", "sana"
+        ]
+
+        # Platform, Contextual, and Time fillers
+        context_stops = [
+            "shopee", "lazada", "app", "item", "items", "seller", "delivery", 
+            "order", "orders", "parcel", "please", "update", "version", "using",
+            "even", "always", "already", "actually", "also", "still", "only",
+            "wala", "meron", "mas", "sobrang", "lalo", "today", "days", "weeks"
+        ]
+
+        # Final combined set
+        default_stopwords = list(set(english_stops + filipino_stops + context_stops))
 
         stopwords = set(default_stopwords)
 
@@ -996,23 +1015,19 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
             filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
             word_counts = Counter(filtered_words)
-            top_words = word_counts.most_common(200)
-            return pd.DataFrame(top_words, columns=["word", "count"])
+            # Increased to 500 as requested
+            top_words = word_counts.most_common(500)
+            # Formats word and count together: "word (count)"
+            return pd.DataFrame([f"{w} ({c})" for w, c in top_words], columns=["Word (Frequency)"])
 
-        with col1:
-            st.subheader("Positive Reviews")
-            pos_df = df_valid[df_valid["sentiment"] == "positive"]
-            pos_words_df = get_top_words(pos_df)
-            st.dataframe(pos_words_df, use_container_width=True)
-
-        with col2:
-            st.subheader("Negative Reviews")
-            neg_df = df_valid[df_valid["sentiment"] == "negative"]
-            neg_words_df = get_top_words(neg_df)
-            st.dataframe(neg_words_df, use_container_width=True)
+        # Process combined words
+        all_words_df = get_top_words(df_valid)
+        st.dataframe(all_words_df, use_container_width=True)
 
         st.write("Excluded words:", ", ".join(default_stopwords))
         
+        
+        # PROCESSED DATASET TABLE
         st.subheader("Processed Dataset")
         final_columns = [
             "reviewId", "reviewDate", "content", "score", "roberta_label",
@@ -1020,7 +1035,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         ]
         available_columns = [col for col in final_columns if col in df_valid.columns]
         display_df = df_valid[available_columns].copy()
-        
         if "reviewDate" in display_df.columns:
             display_df = display_df.sort_values(by="reviewDate", ascending=False)
         st.dataframe(display_df, use_container_width=True)
@@ -1079,6 +1093,7 @@ defaults = {
     "analysis_source_id": None,
     "download_checkpoint_ready": False,
     "analysis_pause_requested": False,
+    
 }
 
 for key, value in defaults.items():
@@ -1096,6 +1111,7 @@ with top_col2:
         clear_saved_checkpoints()
         restart_app_state()
 
+# Processed Data Tab 
 tab_find_app, tab_load_files = st.tabs(["Find an App", "Load Files"])
 
 with tab_find_app:
@@ -1290,10 +1306,9 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
             st.session_state.current_token = None
             st.session_state.current_query_rounds = 0
             st.session_state.current_stagnant_rounds = 0
-        st.rerun()
+        st.rerun() # Removed time.sleep
     except Exception as e:
-        st.error(f"Scraping error: {e}")
-        st.session_state.scraping = False
+        st.error(f"Scraping error: {e}"); st.session_state.scraping = False
 
 if st.session_state.analysis_running or st.session_state.download_checkpoint_ready:
     overall_done = st.session_state.analysis_existing_processed + st.session_state.analysis_processed_count
@@ -1302,8 +1317,7 @@ if st.session_state.analysis_running or st.session_state.download_checkpoint_rea
     st.progress(overall_done / total_reviews if total_reviews > 0 else 0)
     st.write(f"{overall_done} out of {total_reviews} processed. {st.session_state.analysis_skipped_count} skipped.")
     if st.session_state.analysis_running and not st.session_state.analysis_paused:
-        process_analysis_batch()
-        st.rerun()
+        process_analysis_batch(); st.rerun() # Removed time.sleep
 
 if st.session_state.analysis_done:
     df_final = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True)
