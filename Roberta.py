@@ -46,10 +46,15 @@ COUNTRY_OPTIONS = ["ph"]
 
 COUNT_PER_BATCH = 200
 SCRAPE_MAX_ROUNDS_PER_QUERY = 3000
-ROBERTA_BATCH_SIZE = 100 # Increased for faster processing
+ROBERTA_BATCH_SIZE = 100
 ROBERTA_MAX_LENGTH = 128
 CHECKPOINT_INTERVAL = 50000
 CHECKPOINT_DIR = "checkpoints"
+
+# ─────────────────────────────────────────────
+# DATE CUTOFF FOR SCRAPING (2025 onwards)
+# ─────────────────────────────────────────────
+SCRAPE_YEAR_CUTOFF = 2025
 
 
 def safe_name(text):
@@ -273,15 +278,34 @@ def get_current_plan_item():
     return plan[st.session_state.current_plan_index]
 
 
+# ─────────────────────────────────────────────
+# UPDATED: add_new_reviews now filters by SCRAPE_YEAR_CUTOFF
+# and returns a hit_cutoff flag for early exit
+# ─────────────────────────────────────────────
 def add_new_reviews(batch):
     added = 0
+    hit_cutoff = False
+
     for row in batch:
         rid = row.get("reviewId")
+
+        # Date filter: skip reviews older than the cutoff year
+        review_date = row.get("at")
+        if review_date is not None:
+            try:
+                parsed_date = pd.to_datetime(review_date)
+                if parsed_date.year < SCRAPE_YEAR_CUTOFF:
+                    hit_cutoff = True
+                    continue
+            except Exception:
+                pass  # If date can't be parsed, allow the review through
+
         if rid and rid not in st.session_state.seen_review_ids:
             st.session_state.seen_review_ids.add(rid)
             st.session_state.all_reviews.append(row)
             added += 1
-    return added
+
+    return added, hit_cutoff
 
 
 def map_roberta_label(label):
@@ -326,10 +350,9 @@ def prepare_analysis_df(raw_df):
 
     if "reviewDate" in df.columns:
         df["reviewDate"] = pd.to_datetime(df["reviewDate"], errors="coerce")
-        # ---------------------------------------------------------
-        # NEW FILTER: Only keep reviews from 2024 onwards for analysis
-        # ---------------------------------------------------------
-        df = df[df["reviewDate"].dt.year >= 2024]
+        # NOTE: No year filter needed here — scraping already filters to 2025+.
+        # Keeping a safety net filter for uploaded files that may contain older data.
+        df = df[df["reviewDate"].dt.year >= SCRAPE_YEAR_CUTOFF]
 
     if "score" not in df.columns:
         st.error("The uploaded raw file does not contain a 'score' column.")
@@ -352,6 +375,7 @@ def prepare_analysis_df(raw_df):
         df["month"] = df["reviewDate"].dt.to_period("M").astype(str)
 
     return df
+
 
 def prepare_checkpoint_df(checkpoint_df):
     if checkpoint_df is None:
@@ -885,7 +909,6 @@ def show_analysis_results(df_valid, checkpoint_df=None):
 
                     st.dataframe(corr_result, use_container_width=True)
 
-                    
             with col2:
                 st.markdown("### 2. Kruskal-Wallis Test by Month")
 
@@ -971,12 +994,11 @@ def show_analysis_results(df_valid, checkpoint_df=None):
                 else:
                     st.warning("Not enough data for regression analysis.")
 
-# =========================
+        # =========================
         # TOP 500 WORDS ANALYSIS
         # =========================
         st.subheader("Top 500 Words")
 
-        # Base English Stop Words
         english_stops = [
             "the", "and", "is", "to", "of", "in", "for", "on", "with", "this",
             "that", "it", "my", "very", "so", "but", "are", "was", "be",
@@ -985,25 +1007,21 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             "there", "then", "been", "would", "could", "should", "ever", "since"
         ]
 
-        # Filipino/Taglish particles and linkers
         filipino_stops = [
             "ang", "mga", "ng", "sa", "na", "lang", "din", "rin", "po", "opo",
             "nag", "nyo", "mo", "ko", "namin", "nila", "ito", "iyon", "doon",
-            "dito", "naman", "talaga", "pa", "kung", "pag", "kasi", "dahil", 
+            "dito", "naman", "talaga", "pa", "kung", "pag", "kasi", "dahil",
             "pero", "kaya", "siya", "nito", "ni", "una", "tapos", "naka", "sana"
         ]
 
-        # Platform, Contextual, and Time fillers
         context_stops = [
-            "shopee", "lazada", "app", "item", "items", "seller", "delivery", 
+            "shopee", "lazada", "app", "item", "items", "seller", "delivery",
             "order", "orders", "parcel", "please", "update", "version", "using",
             "even", "always", "already", "actually", "also", "still", "only",
             "wala", "meron", "mas", "sobrang", "lalo", "today", "days", "weeks"
         ]
 
-        # Final combined set
         default_stopwords = list(set(english_stops + filipino_stops + context_stops))
-
         stopwords = set(default_stopwords)
 
         def get_top_words(dataframe):
@@ -1011,19 +1029,16 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
             filtered_words = [w for w in words if w not in stopwords and len(w) > 2]
             word_counts = Counter(filtered_words)
-            # Increased to 500 as requested
             top_words = word_counts.most_common(500)
-            # Formats word and count together: "word (count)"
             return pd.DataFrame([f"{w} ({c})" for w, c in top_words], columns=["Word (Frequency)"])
 
-        # Process combined words
         all_words_df = get_top_words(df_valid)
         st.dataframe(all_words_df, use_container_width=True)
-
         st.write("Excluded words:", ", ".join(default_stopwords))
-        
-        
+
+        # =========================
         # PROCESSED DATASET TABLE
+        # =========================
         st.subheader("Processed Dataset")
         final_columns = [
             "reviewId", "reviewDate", "content", "score", "roberta_label",
@@ -1036,7 +1051,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
         st.dataframe(display_df, use_container_width=True)
         csv = display_df.to_csv(index=False).encode("utf-8")
         st.download_button(label="Download Processed Data", data=csv, file_name="processed_reviews.csv", mime="text/csv")
-        
+
         st.write(f"Skipped Reviews: {skipped_count}")
 
         if st.session_state.get("analysis_source_id"):
@@ -1089,7 +1104,6 @@ defaults = {
     "analysis_source_id": None,
     "download_checkpoint_ready": False,
     "analysis_pause_requested": False,
-    
 }
 
 for key, value in defaults.items():
@@ -1107,7 +1121,6 @@ with top_col2:
         clear_saved_checkpoints()
         restart_app_state()
 
-# Processed Data Tab 
 tab_find_app, tab_load_files = st.tabs(["Find an App", "Load Files"])
 
 with tab_find_app:
@@ -1277,6 +1290,9 @@ with tab_load_files:
                 st.session_state.download_checkpoint_ready = False
                 st.rerun()
 
+# ─────────────────────────────────────────────
+# UPDATED SCRAPING LOOP: early exit on date cutoff
+# ─────────────────────────────────────────────
 if st.session_state.scraping and not st.session_state.cancel_requested:
     current_item = get_current_plan_item()
     if current_item is None:
@@ -1289,14 +1305,20 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
             country=current_item["country"], sort=current_item["sort_value"],
             count=COUNT_PER_BATCH, continuation_token=st.session_state.current_token
         )
-        added_count = add_new_reviews(batch)
+
+        # add_new_reviews now returns (added_count, hit_cutoff)
+        added_count, hit_cutoff = add_new_reviews(batch)
+
+        # ── Early exit: we've reached reviews older than SCRAPE_YEAR_CUTOFF ──
+        if hit_cutoff:
+            st.session_state.scraping = False
+            st.session_state.scrape_done = True
+            st.rerun()
+
         st.session_state.batch_index += 1
         st.session_state.current_query_rounds += 1
         st.session_state.current_token = new_token
 
-        # Only count as stagnant if the batch was truly empty or the token looped back.
-        # added_count == 0 alone (all duplicates) is normal during pagination overlap
-        # and should NOT trigger stagnation — only reset it.
         truly_done = len(batch) == 0
         token_looped = (new_token is not None and new_token == st.session_state.current_token)
 
@@ -1304,17 +1326,16 @@ if st.session_state.scraping and not st.session_state.cancel_requested:
             st.session_state.current_stagnant_rounds += 1
         elif added_count > 0:
             st.session_state.current_stagnant_rounds = 0
-        # If added_count == 0 but batch is non-empty, it is a duplicate-heavy overlap —
-        # do not increment or reset; just let it pass through.
 
         if new_token is None or st.session_state.current_stagnant_rounds >= 10 or st.session_state.current_query_rounds >= SCRAPE_MAX_ROUNDS_PER_QUERY:
             st.session_state.current_plan_index += 1
             st.session_state.current_token = None
             st.session_state.current_query_rounds = 0
             st.session_state.current_stagnant_rounds = 0
-        st.rerun() # Removed time.sleep
+        st.rerun()
     except Exception as e:
-        st.error(f"Scraping error: {e}"); st.session_state.scraping = False
+        st.error(f"Scraping error: {e}")
+        st.session_state.scraping = False
 
 if st.session_state.analysis_running or st.session_state.download_checkpoint_ready:
     overall_done = st.session_state.analysis_existing_processed + st.session_state.analysis_processed_count
@@ -1323,7 +1344,8 @@ if st.session_state.analysis_running or st.session_state.download_checkpoint_rea
     st.progress(overall_done / total_reviews if total_reviews > 0 else 0)
     st.write(f"{overall_done} out of {total_reviews} processed. {st.session_state.analysis_skipped_count} skipped.")
     if st.session_state.analysis_running and not st.session_state.analysis_paused:
-        process_analysis_batch(); st.rerun() # Removed time.sleep
+        process_analysis_batch()
+        st.rerun()
 
 if st.session_state.analysis_done:
     df_final = pd.concat(st.session_state.analysis_processed_parts, ignore_index=True)
