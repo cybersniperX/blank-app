@@ -62,35 +62,6 @@ def supabase_save_scrape_reviews(app_id, batch):
         st.warning(f"Review save failed: {e}")
 
 
-def supabase_save_analysis_batch(app_id, batch_rows):
-    try:
-        sb = get_supabase_client()
-        rows = []
-        for r in batch_rows:
-            rows.append({
-                "app_id":            app_id,
-                "review_id":         str(r.get("reviewId", "")),
-                "content":           r.get("content"),
-                "score":             r.get("score"),
-                "review_date":       str(r.get("reviewDate", "")) if r.get("reviewDate") else None,
-                "clean_text":        r.get("clean_text"),
-                "month":             r.get("month"),
-                "roberta_label":     r.get("roberta_label"),
-                "roberta_score":     r.get("roberta_score"),
-                "sentiment":         r.get("sentiment"),
-                "sentiment_score":   r.get("sentiment_score"),
-                "actual_label":      r.get("actual_label"),
-                "review_word_count": r.get("reviewWordCount"),
-            })
-        chunk_size = 500
-        for i in range(0, len(rows), chunk_size):
-            sb.table("analysis_checkpoints").upsert(rows[i:i + chunk_size]).execute()
-        overall_done = st.session_state.analysis_existing_processed + st.session_state.analysis_processed_count
-        st.toast(f"Analysis checkpoint saved: {overall_done:,} reviews processed")
-    except Exception as e:
-        st.warning(f"Analysis save failed: {e}")
-
-
 def supabase_save_scrape_token(app_id, token, total_scraped):
     try:
         sb = get_supabase_client()
@@ -175,9 +146,6 @@ def load_scrape_from_supabase(app_id):
             st.session_state.seen_review_ids.add(rid)
             st.session_state.all_reviews.append(review)
 
-    saved_token = token_row.get("continuation_token")
-    # Reset token to None so scraper restarts from beginning
-    # but keeps all already-scraped reviews loaded from Supabase
     st.session_state.current_token = None
     st.session_state.scraping = True
     st.session_state.scrape_start = time.time()
@@ -212,6 +180,8 @@ def supabase_save_analysis_batch(app_id, batch_rows):
         chunk_size = 500
         for i in range(0, len(rows), chunk_size):
             sb.table("analysis_checkpoints").upsert(rows[i:i + chunk_size]).execute()
+        overall_done = st.session_state.analysis_existing_processed + st.session_state.analysis_processed_count
+        st.toast(f"Analysis checkpoint saved: {overall_done:,} reviews processed")
     except Exception as e:
         st.warning(f"Analysis save failed: {e}")
 
@@ -288,7 +258,6 @@ def load_analysis_from_supabase(app_id, full_df):
 
     checkpoint_df = pd.DataFrame(rows)
 
-    # Rename columns back to match app format
     rename_map = {
         "review_id":         "reviewId",
         "review_date":       "reviewDate",
@@ -626,7 +595,6 @@ def start_analysis(raw_df, source_id=None):
 
     app_id = st.session_state.get("checked_app_id")
 
-    # Try to resume from Supabase first
     resumed = False
     if app_id:
         resumed = load_analysis_from_supabase(app_id, df)
@@ -729,7 +697,6 @@ def process_analysis_batch():
     st.session_state.analysis_processed_parts.append(pd.DataFrame(batch_rows))
     st.session_state.analysis_remaining_df = next_remaining_df
 
-    # Save batch to Supabase
     app_id = st.session_state.get("analysis_app_id")
     if app_id:
         supabase_save_analysis_batch(app_id, batch_rows)
@@ -1140,7 +1107,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             "there", "then", "been", "would", "could", "should", "ever", "since",
             "good", "nice", "ok", "okay", "much", "than", "more", "great", "best"
         ]
-        
+
         filipino_stops = [
             "ang", "mga", "ng", "sa", "na", "lang", "din", "rin", "po", "opo",
             "nag", "nyo", "mo", "ko", "namin", "nila", "ito", "iyon", "doon",
@@ -1148,7 +1115,7 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             "pero", "kaya", "siya", "nito", "ni", "una", "tapos", "naka", "sana",
             "ako", "yung", "may", "hindi", "kaso", "isang", "halos", "niyo", "naku"
         ]
-        
+
         context_stops = [
             "shopee", "lazada", "app", "item", "items", "seller", "delivery",
             "order", "orders", "parcel", "please", "update", "version", "using",
@@ -1168,28 +1135,28 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             return pd.DataFrame([f"{w} ({c})" for w, c in top_words], columns=["Word (Frequency)"])
 
         all_words_df = get_top_words(df_valid)
-                st.dataframe(all_words_df, use_container_width=True)
-                st.write("Excluded words:", ", ".join(default_stopwords))
+        st.dataframe(all_words_df, use_container_width=True)
+        st.write("Excluded words:", ", ".join(default_stopwords))
 
-                col_pos, col_neg = st.columns(2)
+        col_pos, col_neg = st.columns(2)
 
-                with col_pos:
-                    st.markdown("### Top 500 Words — Positive Sentiment")
-                    df_positive = df_valid[df_valid["sentiment"] == "positive"]
-                    if not df_positive.empty:
-                        pos_words_df = get_top_words(df_positive)
-                        st.dataframe(pos_words_df, use_container_width=True)
-                    else:
-                        st.info("No positive sentiment reviews found.")
+        with col_pos:
+            st.markdown("### Top 500 Words — Positive Sentiment")
+            df_positive = df_valid[df_valid["sentiment"] == "positive"]
+            if not df_positive.empty:
+                pos_words_df = get_top_words(df_positive)
+                st.dataframe(pos_words_df, use_container_width=True)
+            else:
+                st.info("No positive sentiment reviews found.")
 
-                with col_neg:
-                    st.markdown("### Top 500 Words — Negative Sentiment")
-                    df_negative = df_valid[df_valid["sentiment"] == "negative"]
-                    if not df_negative.empty:
-                        neg_words_df = get_top_words(df_negative)
-                        st.dataframe(neg_words_df, use_container_width=True)
-                    else:
-                        st.info("No negative sentiment reviews found.")
+        with col_neg:
+            st.markdown("### Top 500 Words — Negative Sentiment")
+            df_negative = df_valid[df_valid["sentiment"] == "negative"]
+            if not df_negative.empty:
+                neg_words_df = get_top_words(df_negative)
+                st.dataframe(neg_words_df, use_container_width=True)
+            else:
+                st.info("No negative sentiment reviews found.")
 
         # =========================
         # PROCESSED DATASET TABLE
