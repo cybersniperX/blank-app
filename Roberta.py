@@ -1137,21 +1137,25 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             "that", "it", "my", "very", "so", "but", "are", "was", "be",
             "have", "has", "had", "not", "at", "you", "we", "they", "i", "your",
             "just", "can", "will", "from", "all", "get", "when", "about", "their",
-            "there", "then", "been", "would", "could", "should", "ever", "since"
+            "there", "then", "been", "would", "could", "should", "ever", "since",
+            "good", "nice", "ok", "okay", "much", "than", "more", "great", "best"
         ]
+        
         filipino_stops = [
             "ang", "mga", "ng", "sa", "na", "lang", "din", "rin", "po", "opo",
             "nag", "nyo", "mo", "ko", "namin", "nila", "ito", "iyon", "doon",
             "dito", "naman", "talaga", "pa", "kung", "pag", "kasi", "dahil",
-            "pero", "kaya", "siya", "nito", "ni", "una", "tapos", "naka", "sana"
+            "pero", "kaya", "siya", "nito", "ni", "una", "tapos", "naka", "sana",
+            "ako", "yung", "may", "hindi", "kaso", "isang", "halos", "niyo", "naku"
         ]
+        
         context_stops = [
             "shopee", "lazada", "app", "item", "items", "seller", "delivery",
             "order", "orders", "parcel", "please", "update", "version", "using",
             "even", "always", "already", "actually", "also", "still", "only",
-            "wala", "meron", "mas", "sobrang", "lalo", "today", "days", "weeks"
+            "wala", "meron", "mas", "sobrang", "lalo", "today", "days", "weeks",
+            "pls", "thankyou", "thank", "shoppe", "shoppee", "apps", "similar"
         ]
-
         default_stopwords = list(set(english_stops + filipino_stops + context_stops))
         stopwords = set(default_stopwords)
 
@@ -1164,8 +1168,28 @@ def show_analysis_results(df_valid, checkpoint_df=None):
             return pd.DataFrame([f"{w} ({c})" for w, c in top_words], columns=["Word (Frequency)"])
 
         all_words_df = get_top_words(df_valid)
-        st.dataframe(all_words_df, use_container_width=True)
-        st.write("Excluded words:", ", ".join(default_stopwords))
+                st.dataframe(all_words_df, use_container_width=True)
+                st.write("Excluded words:", ", ".join(default_stopwords))
+
+                col_pos, col_neg = st.columns(2)
+
+                with col_pos:
+                    st.markdown("### Top 500 Words — Positive Sentiment")
+                    df_positive = df_valid[df_valid["sentiment"] == "positive"]
+                    if not df_positive.empty:
+                        pos_words_df = get_top_words(df_positive)
+                        st.dataframe(pos_words_df, use_container_width=True)
+                    else:
+                        st.info("No positive sentiment reviews found.")
+
+                with col_neg:
+                    st.markdown("### Top 500 Words — Negative Sentiment")
+                    df_negative = df_valid[df_valid["sentiment"] == "negative"]
+                    if not df_negative.empty:
+                        neg_words_df = get_top_words(df_negative)
+                        st.dataframe(neg_words_df, use_container_width=True)
+                    else:
+                        st.info("No negative sentiment reviews found.")
 
         # =========================
         # PROCESSED DATASET TABLE
